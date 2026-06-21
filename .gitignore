@@ -5,6 +5,15 @@ ytdlp-extension/dist/
 *.zip
 *.xpi
 
+# native app build (PyInstaller + fetched binaries + generated icons)
+build/
+dist/
+packaging/bin/
+packaging/icon.icns
+packaging/icon.ico
+packaging/app_icon.png
+*.spec
+
 # python
 __pycache__/
 *.pyc

@@ -26,3 +26,18 @@ python3 app.py
 ## Конфигурация
 
 Выбранная папка сохранения хранится в `~/.ytdlpgui_config.json`.
+
+## Нативные сборки (DMG / EXE)
+
+`app.py` кросс-платформенный (macOS / Windows / Linux): сам находит
+bundled `yt-dlp`/`ffmpeg`, открывает браузер при старте и использует нативный
+выбор папки для каждой ОС. Готовые self-contained сборки собираются из корня
+репозитория:
+
+```bash
+bash packaging/build_macos.sh      # → dist/WaxDigger.dmg
+pwsh packaging/build_windows.ps1   # → dist/WaxDigger.exe
+```
+
+Сборки бандлят `yt-dlp` и `ffmpeg` внутрь — пользователю ничего ставить не надо.
+Автоматически всё это собирает GitHub Actions по тегу `v*` (см. корневой README).

@@ -1,15 +1,13 @@
-name: Build & Release extension
+name: Build & Release
 
-# Pushes a packaged build to a GitHub Release whenever you tag a version, e.g.:
-#   git tag v1.0.0 && git push origin v1.0.0
+# On a version tag (git tag v1.0.0 && git push origin v1.0.0) this builds:
+#   - the browser extension packages (Chrome zip + Firefox zip/signed xpi)
+#   - WaxDigger.dmg   (macOS, self-contained: bundles yt-dlp + ffmpeg)
+#   - WaxDigger.exe   (Windows portable, self-contained)
+# and attaches them all to a single GitHub Release.
 #
-# Chrome/Chromium users grab wax-digger-chrome.zip and "Load unpacked".
-# Firefox users get a signed .xpi (one-click, permanent) IF you set the two
-# AMO secrets below; otherwise an unsigned firefox zip is attached instead.
-#
-# Optional repo secrets (Settings → Secrets and variables → Actions):
-#   AMO_JWT_ISSUER  — from https://addons.mozilla.org/developers/addon/api/key/
-#   AMO_JWT_SECRET  —  "
+# Optional repo secrets for a signed one-click Firefox add-on:
+#   AMO_JWT_ISSUER / AMO_JWT_SECRET  (from addons.mozilla.org/developers/addon/api/key/)
 
 on:
   push:
@@ -20,28 +18,26 @@ on:
 permissions:
   contents: write
 
-defaults:
-  run:
-    working-directory: ytdlp-extension
-
 jobs:
-  release:
+  # ---------------- browser extension ----------------
+  extension:
     runs-on: ubuntu-latest
     env:
       HAS_AMO: ${{ secrets.AMO_JWT_ISSUER != '' && secrets.AMO_JWT_SECRET != '' }}
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
 
       - name: Build packages
+        working-directory: ytdlp-extension
         run: node build.js
 
       - name: Sign Firefox add-on (if AMO secrets present)
         id: sign
         if: env.HAS_AMO == 'true'
+        working-directory: ytdlp-extension
         env:
           AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
           AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
@@ -54,7 +50,8 @@ jobs:
             --api-secret "$AMO_JWT_SECRET"
           echo "signed=true" >> "$GITHUB_OUTPUT"
 
-      - name: Collect artifacts
+      - name: Collect extension artifacts
+        working-directory: ytdlp-extension
         run: |
           mkdir -p out
           cp dist/wax-digger-chrome.zip out/
@@ -63,23 +60,68 @@ jobs:
           else
             cp dist/wax-digger-firefox.zip out/
           fi
-          ls -la out
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: extension
+          path: ytdlp-extension/out/*
+
+  # ---------------- macOS .dmg ----------------
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pyinstaller pillow flask
+      - name: Build DMG
+        run: bash packaging/build_macos.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/WaxDigger.dmg
+
+  # ---------------- Windows .exe ----------------
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pyinstaller pillow flask
+      - name: Build EXE
+        shell: pwsh
+        run: packaging/build_windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/WaxDigger.exe
+
+  # ---------------- publish release ----------------
+  release:
+    needs: [extension, macos, windows]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: ytdlp-extension/out/*
+          files: artifacts/**/*
           generate_release_notes: true
           body: |
-            ## Install
+            ## Downloads
 
-            **Chrome / Edge / Brave / Opera / Vivaldi / Arc**
-            1. Download `wax-digger-chrome.zip` and unzip it.
-            2. Open `chrome://extensions`, enable **Developer mode**.
-            3. **Load unpacked** → select the unzipped folder.
+            | Platform | File | Notes |
+            | --- | --- | --- |
+            | **macOS** | `WaxDigger.dmg` | Open the DMG, drag **Wax Digger** to Applications. First launch: right-click → Open (unsigned). |
+            | **Windows** | `WaxDigger.exe` | Portable — just double-click. SmartScreen → More info → Run anyway (unsigned). |
+            | **Chrome/Edge/Brave/…** | `wax-digger-chrome.zip` | Unzip → `chrome://extensions` → Developer mode → Load unpacked. |
+            | **Firefox** | `.xpi` or `wax-digger-firefox.zip` | `.xpi` installs permanently; zip = temporary via about:debugging. |
 
-            **Firefox**
-            - If a `.xpi` is attached: click it in Firefox to install (permanent).
-            - Otherwise enable temporarily via `about:debugging` → *Load Temporary Add-on*.
-
-            The local **YTDLP GUI** server must be running for downloads to work.
+            The desktop app bundles **yt-dlp + ffmpeg** — nothing else to install.
+            Run the app, then use the popup or the ↓ button on badger.greenlight.hr.

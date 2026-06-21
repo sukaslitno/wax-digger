@@ -2,13 +2,43 @@ import json
 import os
 import queue
 import shutil
+import socket
 import subprocess
 import sys
+import tempfile
 import threading
+import webbrowser
+
 from flask import Flask, Response, jsonify, render_template, request
 
-app = Flask(__name__)
+HOST = "127.0.0.1"
+PORT = 7337
+URL = f"http://{HOST}:{PORT}"
+IS_WINDOWS = os.name == "nt"
 
+
+# ---------------------------------------------------------------------------
+# Resource resolution — works both in dev and inside a PyInstaller bundle.
+# ---------------------------------------------------------------------------
+def resource_dir():
+    """Directory that holds bundled data (templates, bin/) at runtime."""
+    if getattr(sys, "frozen", False):
+        # PyInstaller extracts datas/binaries here (onefile) or next to the exe.
+        return getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+RES = resource_dir()
+
+
+def bundled_binary(name):
+    """Return path to a yt-dlp/ffmpeg binary shipped inside the app, or None."""
+    exe = name + (".exe" if IS_WINDOWS else "")
+    candidate = os.path.join(RES, "bin", exe)
+    return candidate if os.path.isfile(candidate) else None
+
+
+# Search path for a system yt-dlp when nothing is bundled (dev convenience).
 YTDLP_EXTRA_PATHS = [
     os.path.expanduser("~/Library/Python/3.9/bin"),
     os.path.expanduser("~/Library/Python/3.10/bin"),
@@ -19,7 +49,11 @@ YTDLP_EXTRA_PATHS = [
     "/usr/local/bin",
 ]
 
+
 def find_ytdlp():
+    bundled = bundled_binary("yt-dlp")
+    if bundled:
+        return [bundled]
     found = shutil.which("yt-dlp")
     if found:
         return [found]
@@ -27,13 +61,26 @@ def find_ytdlp():
         candidate = os.path.join(p, "yt-dlp")
         if os.path.isfile(candidate):
             return [candidate]
-    # fallback: run as python module
+    # last resort: run as a python module
     return [sys.executable, "-m", "yt_dlp"]
 
-YTDLP_CMD = find_ytdlp()
 
-CONFIG_PATH = os.path.expanduser("~/.ytdlpgui_config.json")
-DEFAULT_FOLDER = os.path.expanduser("~/Downloads")
+def find_ffmpeg_location():
+    """Directory containing a bundled ffmpeg, passed to yt-dlp. None = use PATH."""
+    bundled = bundled_binary("ffmpeg")
+    if bundled:
+        return os.path.dirname(bundled)
+    return None
+
+
+YTDLP_CMD = find_ytdlp()
+FFMPEG_LOCATION = find_ffmpeg_location()
+
+CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".ytdlpgui_config.json")
+DEFAULT_FOLDER = os.path.join(os.path.expanduser("~"), "Downloads")
+TEMP_DIR = os.path.join(tempfile.gettempdir(), "ytdlp-gui-temp")
+
+app = Flask(__name__, template_folder=os.path.join(RES, "templates"))
 
 download_queue = queue.Queue()
 history = []
@@ -59,6 +106,34 @@ def load_config():
 def save_config(data):
     with open(CONFIG_PATH, "w") as f:
         json.dump(data, f)
+
+
+def pick_folder():
+    """Open a native folder picker for the current OS. Returns a path or ""."""
+    try:
+        if sys.platform == "darwin":
+            script = 'tell application "Finder" to set f to choose folder\nPOSIX path of f'
+            r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+            return r.stdout.strip()
+        if IS_WINDOWS:
+            ps = (
+                "Add-Type -AssemblyName System.Windows.Forms;"
+                "$d = New-Object System.Windows.Forms.FolderBrowserDialog;"
+                "if ($d.ShowDialog() -eq 'OK') { $d.SelectedPath }"
+            )
+            r = subprocess.run(
+                ["powershell", "-NoProfile", "-STA", "-Command", ps],
+                capture_output=True, text=True,
+            )
+            return r.stdout.strip()
+        # Linux / other: try zenity
+        r = subprocess.run(
+            ["zenity", "--file-selection", "--directory"],
+            capture_output=True, text=True,
+        )
+        return r.stdout.strip()
+    except Exception:
+        return ""
 
 
 # Allow the Chrome/Firefox extension (popup + injected content script) to call the
@@ -97,9 +172,7 @@ def get_folder():
 
 @app.route("/choose-folder", methods=["POST"])
 def choose_folder():
-    script = 'tell application "Finder" to set f to choose folder\nPOSIX path of f'
-    result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
-    path = result.stdout.strip()
+    path = pick_folder()
     if path:
         cfg = load_config()
         cfg["output_path"] = path
@@ -119,17 +192,17 @@ def download():
         return jsonify({"error": "URL is required"}), 400
 
     fmt_args = FORMATS.get(fmt, FORMATS["mp3_320"])
-    tmp_dir = "/tmp/ytdlp-gui-temp"
-    os.makedirs(tmp_dir, exist_ok=True)
+    os.makedirs(TEMP_DIR, exist_ok=True)
     cmd = YTDLP_CMD + fmt_args + [
         "-k",
         "-o", "%(title)s.%(ext)s",
         "-P", output_path,
-        "-P", f"temp:{tmp_dir}",
-        url,
+        "-P", f"temp:{TEMP_DIR}",
     ]
+    if FFMPEG_LOCATION:
+        cmd += ["--ffmpeg-location", FFMPEG_LOCATION]
+    cmd.append(url)
 
-    stream_id = threading.get_ident()
     q = queue.Queue()
     active_streams[id(q)] = q
 
@@ -140,12 +213,17 @@ def download():
 
     def run():
         try:
+            kwargs = {}
+            if IS_WINDOWS:
+                # don't pop a console window for the child process
+                kwargs["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
             proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
+                **kwargs,
             )
             for line in proc.stdout:
                 line = line.rstrip()
@@ -200,5 +278,20 @@ def get_history():
     return jsonify(history)
 
 
+def _port_in_use():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.4)
+        return s.connect_ex((HOST, PORT)) == 0
+
+
+def main():
+    # If an instance is already running, just surface its window and exit.
+    if _port_in_use():
+        webbrowser.open(URL)
+        return
+    threading.Timer(1.2, lambda: webbrowser.open(URL)).start()
+    app.run(host=HOST, port=PORT, debug=False)
+
+
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=7337, debug=False)
+    main()
