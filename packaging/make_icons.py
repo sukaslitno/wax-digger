@@ -51,16 +51,16 @@ def main():
 
     png = os.path.join(HERE, "app_icon.png")
     img.save(png)
-    print(f"✓ {os.path.relpath(png, HERE)}")
+    print(f"wrote {os.path.relpath(png, HERE)}")
 
     ico = os.path.join(HERE, "icon.ico")
     img.save(ico, sizes=[(256, 256), (128, 128), (64, 64), (48, 48), (32, 32), (16, 16)])
-    print(f"✓ {os.path.relpath(ico, HERE)}")
+    print(f"wrote {os.path.relpath(ico, HERE)}")
 
     icns = os.path.join(HERE, "icon.icns")
     try:
         img.save(icns)
-        print(f"✓ {os.path.relpath(icns, HERE)}")
+        print(f"wrote {os.path.relpath(icns, HERE)}")
     except Exception as e:
         print(f"! could not write icon.icns ({e}); macOS build can fall back to iconutil")
 
