@@ -1,0 +1,899 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YTDLP GUI</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600;700;800&display=swap');
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* ===== Light theme (paper / VFD) ===== */
+    :root, [data-theme="light"] {
+      --bg: #e8e1ce;
+      --surface: #e0d8c2;
+      --surface-2: #d6cdb4;
+      --text: #211c13;
+      --muted: #7a715a;
+      --faint: #a99e80;
+      --border: #211c13;
+      --border-soft: rgba(33, 28, 19, 0.22);
+      --accent: #211c13;
+      --accent-text: #e8e1ce;
+      --ok: #2f7a32;
+      --err: #b3261e;
+    }
+
+    /* ===== Dark theme = inverted light ===== */
+    [data-theme="dark"] {
+      --bg: #211c13;
+      --surface: #29241a;
+      --surface-2: #322c20;
+      --text: #e8e1ce;
+      --muted: #9a9078;
+      --faint: #6b6450;
+      --border: #e8e1ce;
+      --border-soft: rgba(232, 225, 206, 0.22);
+      --accent: #e8e1ce;
+      --accent-text: #211c13;
+      --ok: #6ad06d;
+      --err: #ff6a60;
+    }
+
+    :root { --ctl-h: 48px; }
+
+    body {
+      font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+      font-weight: 600;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      padding: 40px 16px;
+      transition: background-color 0.2s, color 0.2s;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .container { width: 100%; max-width: 600px; }
+
+    /* ===== Theme toggle (fixed, top-right corner) ===== */
+    .theme-toggle {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      z-index: 10;
+      font-family: inherit;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 0;
+      height: 32px;
+      padding: 0 12px;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    .theme-toggle:hover { background: var(--accent); color: var(--accent-text); }
+
+    h1 {
+      font-size: clamp(40px, 11vw, 66px);
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      text-align: center;
+      color: var(--text);
+      margin: 8px 0 40px;
+      line-height: 1.02;
+    }
+    h1 .cursor { animation: blink 1.1s steps(1) infinite; }
+    @keyframes blink { 0%, 50% { opacity: 1; } 50.01%, 100% { opacity: 0; } }
+
+    .section { margin-bottom: 22px; }
+
+    /* ===== Field labels ===== */
+    .section > label {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+    .section > label::before { content: "\25B8"; color: var(--text); }
+    .section > label::after {
+      content: "";
+      flex: 1;
+      border-bottom: 1px dotted var(--border-soft);
+    }
+    .section > label .hint {
+      text-transform: none;
+      letter-spacing: 0;
+      font-weight: 600;
+      font-size: 11px;
+      color: var(--faint);
+    }
+
+    /* ===== Text input ===== */
+    input[type="text"] {
+      width: 100%;
+      height: var(--ctl-h);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 0;
+      padding: 0 16px;
+      font-size: 14px;
+      font-weight: 600;
+      font-family: inherit;
+      color: var(--text);
+      outline: none;
+      transition: box-shadow 0.15s;
+    }
+    input[type="text"]:focus { box-shadow: inset 0 0 0 1px var(--accent); }
+    input[type="text"]::placeholder { color: var(--faint); font-weight: 500; }
+
+    /* ===== Segment control (format) ===== */
+    .segment {
+      display: flex;
+      height: var(--ctl-h);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 0;
+      overflow: hidden;
+    }
+    .segment input[type="radio"] { display: none; }
+    .segment label {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      color: var(--muted);
+      cursor: pointer;
+      transition: color 0.15s, background 0.15s;
+      border-right: 1px solid var(--border);
+    }
+    .segment label:last-of-type { border-right: none; }
+    .segment input[type="radio"]:checked + label {
+      background: var(--accent);
+      color: var(--accent-text);
+    }
+
+    /* ===== Folder row ===== */
+    .folder-row { display: flex; align-items: center; gap: 10px; }
+    .folder-path {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      height: var(--ctl-h);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 0;
+      padding: 0 16px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .btn-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      height: var(--ctl-h);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 0;
+      padding: 0 18px;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-family: inherit;
+      color: var(--text);
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s, color 0.15s;
+    }
+    .btn-secondary:hover { background: var(--accent); color: var(--accent-text); }
+    .btn-secondary .ico { flex-shrink: 0; }
+
+    /* ===== Primary button ===== */
+    .btn-primary {
+      width: 100%;
+      height: var(--ctl-h);
+      background: var(--accent);
+      border: 1px solid var(--accent);
+      border-radius: 0;
+      font-size: 14px;
+      font-weight: 800;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      font-family: inherit;
+      color: var(--accent-text);
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s, opacity 0.15s;
+    }
+    .btn-primary:hover { background: var(--bg); color: var(--accent); }
+    .btn-primary:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      background: var(--accent);
+      color: var(--accent-text);
+    }
+
+    /* ===== Progress bar ===== */
+    .progress-row { display: flex; }
+    .progress-track {
+      position: relative;
+      flex: 1;
+      height: var(--ctl-h);
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      overflow: hidden;
+    }
+    .progress-fill {
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 0%;
+      background: var(--accent);
+      transition: width 0.25s ease, background-color 0.2s;
+    }
+    .progress-fill.done  { background: var(--ok); }
+    .progress-fill.error { background: var(--err); }
+    .progress-num {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      pointer-events: none;
+    }
+    .progress-num-base { color: var(--text); }
+    .progress-num-over {
+      color: var(--accent-text);
+      clip-path: inset(0 100% 0 0);
+      transition: clip-path 0.25s ease;
+    }
+    .progress-state {
+      margin-top: 10px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .progress-state.done  { color: var(--ok); }
+    .progress-state.error { color: var(--err); }
+
+    /* ===== History ===== */
+    .history-list { list-style: none; }
+    .history-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 11px 0;
+      border-bottom: 1px dotted var(--border-soft);
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .history-item:last-child { border-bottom: none; }
+    .hist-name {
+      flex: 1;
+      color: var(--text);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .hist-fmt {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      text-transform: uppercase;
+      flex-shrink: 0;
+    }
+    .hist-status {
+      font-size: 13px;
+      font-weight: 800;
+      flex-shrink: 0;
+      width: 16px;
+      text-align: center;
+    }
+    .hist-status.done        { color: var(--ok); }
+    .hist-status.error       { color: var(--err); }
+    .hist-status.downloading { color: var(--text); }
+
+    .empty-history {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--faint);
+      text-align: center;
+      padding: 18px 0;
+    }
+
+    /* ===== Output log (collapsible) ===== */
+    .log-toggle {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      width: 100%;
+      margin-top: 16px;
+      padding: 6px 0;
+      background: transparent;
+      border: none;
+      font-family: inherit;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      cursor: pointer;
+      transition: color 0.15s;
+    }
+    .log-toggle:hover { color: var(--text); }
+    .log-toggle .tri {
+      display: inline-block;
+      color: var(--text);
+      transition: transform 0.15s;
+    }
+    .log-toggle.open .tri { transform: rotate(90deg); }
+    .log-toggle::after {
+      content: "";
+      flex: 1;
+      border-bottom: 1px dotted var(--border-soft);
+    }
+    .log-wrap { margin-top: 10px; }
+    .log-box {
+      height: 160px;
+      overflow-y: auto;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      padding: 12px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 1.65;
+      color: var(--muted);
+      word-break: break-word;
+    }
+    .log-box::-webkit-scrollbar { width: 8px; }
+    .log-box::-webkit-scrollbar-thumb { background: var(--border-soft); }
+    .log-line::before { content: "\203A "; color: var(--faint); }
+    .log-line.done { color: var(--ok); }
+    .log-line.error { color: var(--err); }
+    .log-actions { display: flex; justify-content: flex-end; margin-top: 8px; }
+    .log-copy {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      height: 34px;
+      padding: 0 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 0;
+      font-family: inherit;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text);
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    .log-copy:hover { background: var(--accent); color: var(--accent-text); }
+    .log-copy svg { flex-shrink: 0; }
+
+    /* ===== Info icon in label ===== */
+    .info-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      padding: 0;
+      border: 1px solid var(--border);
+      border-radius: 50%;
+      background: transparent;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 11px;
+      font-weight: 800;
+      line-height: 1;
+      text-transform: lowercase;
+      letter-spacing: 0;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: background 0.15s, color 0.15s;
+    }
+    .info-btn:hover { background: var(--accent); color: var(--accent-text); }
+
+    /* ===== Input validation ===== */
+    input[type="text"].invalid {
+      border-color: var(--err);
+      box-shadow: inset 0 0 0 1px var(--err);
+    }
+    .field-hint {
+      display: none;
+      margin-top: 8px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      color: var(--err);
+    }
+    .field-hint.show { display: block; }
+
+    /* ===== Supported-sites modal ===== */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: rgba(33, 28, 19, 0.55);
+    }
+    [data-theme="dark"] .modal-overlay { background: rgba(0, 0, 0, 0.6); }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      width: 100%;
+      max-width: 520px;
+      max-height: 82vh;
+      overflow-y: auto;
+      background: var(--bg);
+      border: 1px solid var(--border);
+    }
+    .modal-head {
+      position: sticky;
+      top: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 18px;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+    .modal-close {
+      background: transparent;
+      border: none;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 16px;
+      font-weight: 700;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .modal-body { padding: 18px; }
+    .modal-sub {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--muted);
+      line-height: 1.55;
+      margin-bottom: 18px;
+    }
+    .site-cat { margin-bottom: 16px; }
+    .site-cat h4 {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 9px;
+    }
+    .site-cat h4::after {
+      content: "";
+      flex: 1;
+      border-bottom: 1px dotted var(--border-soft);
+    }
+    .site-list { display: flex; flex-wrap: wrap; gap: 6px; }
+    .site-list span {
+      font-size: 12px;
+      font-weight: 700;
+      padding: 5px 10px;
+      border: 1px solid var(--border-soft);
+      color: var(--text);
+    }
+    .modal-note {
+      margin-top: 6px;
+      padding-top: 15px;
+      border-top: 1px solid var(--border-soft);
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+    .modal-note b { color: var(--err); font-weight: 800; }
+  </style>
+</head>
+<body>
+<button type="button" class="theme-toggle" id="themeToggle" aria-label="Toggle theme">&#9681; LIGHT</button>
+<div class="container">
+  <h1>WAX&nbsp;DIGGER<span class="cursor">_</span></h1>
+
+  <div class="section">
+    <label>Song Link
+      <button type="button" class="info-btn" id="infoBtn" aria-label="Supported sites">i</button>
+    </label>
+    <input type="text" id="url" placeholder="Paste a track or video link" autocomplete="off" spellcheck="false">
+    <div class="field-hint" id="urlHint"></div>
+  </div>
+
+  <div class="section">
+    <label>Format</label>
+    <div class="segment">
+      <input type="radio" name="fmt" id="f1" value="mp3_128">
+      <label for="f1">MP3 128k</label>
+      <input type="radio" name="fmt" id="f2" value="mp3_320" checked>
+      <label for="f2">MP3 320k</label>
+      <input type="radio" name="fmt" id="f3" value="flac">
+      <label for="f3">FLAC</label>
+      <input type="radio" name="fmt" id="f4" value="wav">
+      <label for="f4">WAV</label>
+      <input type="radio" name="fmt" id="f5" value="aac">
+      <label for="f5">AAC</label>
+    </div>
+  </div>
+
+  <div class="section">
+    <label>Output folder</label>
+    <div class="folder-row">
+      <div class="folder-path" id="folderPath">~/Downloads</div>
+      <button class="btn-secondary" onclick="chooseFolder()">
+        <svg class="ico" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" stroke-linejoin="miter"><path d="M3 6h6l2 2h10v11H3z"/></svg>
+        Browse
+      </button>
+    </div>
+  </div>
+
+  <div class="section">
+    <button class="btn-primary" id="dlBtn" onclick="startDownload()">Download</button>
+  </div>
+
+  <div class="section" id="progressSection" style="display:none">
+    <label>Progress</label>
+    <div class="progress-row">
+      <div class="progress-track">
+        <div class="progress-fill" id="progressFill"></div>
+        <span class="progress-num progress-num-base" id="progressPctBase">0%</span>
+        <span class="progress-num progress-num-over" id="progressPctOver">0%</span>
+      </div>
+    </div>
+    <div class="progress-state" id="progressState">Queued</div>
+
+    <button type="button" class="log-toggle" id="logToggle" aria-expanded="false">
+      <span class="tri">&#9656;</span> Output Log
+    </button>
+    <div class="log-wrap" id="logWrap" hidden>
+      <div class="log-box" id="logBox"></div>
+      <div class="log-actions">
+        <button type="button" class="log-copy" id="logCopy">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" stroke-linejoin="miter"><rect x="9" y="9" width="11" height="11"/><path d="M5 15H4V4h11v1"/></svg>
+          <span id="logCopyLabel">Copy</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <label>History</label>
+    <ul class="history-list" id="historyList">
+      <li class="empty-history">No downloads yet</li>
+    </ul>
+  </div>
+</div>
+
+<div class="modal-overlay" id="sitesModal">
+  <div class="modal" role="dialog" aria-modal="true" aria-label="Supported sites">
+    <div class="modal-head">
+      <span>Supported Sites</span>
+      <button type="button" class="modal-close" id="modalClose" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p class="modal-sub">yt-dlp can extract audio from <b>1700+ sites</b>. The most common ones:</p>
+
+      <div class="site-cat">
+        <h4>Music</h4>
+        <div class="site-list">
+          <span>SoundCloud</span><span>Bandcamp</span><span>Mixcloud</span>
+          <span>Audiomack</span><span>Audius</span><span>YouTube&nbsp;Music</span>
+        </div>
+      </div>
+
+      <div class="site-cat">
+        <h4>Video</h4>
+        <div class="site-list">
+          <span>YouTube</span><span>Vimeo</span><span>Dailymotion</span>
+          <span>Bilibili</span><span>Niconico</span>
+        </div>
+      </div>
+
+      <div class="site-cat">
+        <h4>Social</h4>
+        <div class="site-list">
+          <span>TikTok</span><span>Instagram</span><span>Facebook</span>
+          <span>X&nbsp;/&nbsp;Twitter</span><span>Reddit</span><span>VK</span>
+        </div>
+      </div>
+
+      <div class="site-cat">
+        <h4>Live</h4>
+        <div class="site-list">
+          <span>Twitch</span>
+        </div>
+      </div>
+
+      <p class="modal-note">
+        <b>Not supported:</b> Spotify, Apple Music, Deezer, Tidal, Amazon Music, Pandora, Qobuz —
+        DRM-protected streaming, can't be downloaded.
+      </p>
+    </div>
+  </div>
+</div>
+
+<script>
+  let currentFolder = "";
+  let downloading = false;
+  let urlInvalid = false;
+
+  async function loadFolder() {
+    const r = await fetch("/get-folder");
+    const d = await r.json();
+    currentFolder = d.path;
+    document.getElementById("folderPath").textContent = d.path;
+  }
+
+  async function chooseFolder() {
+    const r = await fetch("/choose-folder", { method: "POST" });
+    const d = await r.json();
+    if (d.path) {
+      currentFolder = d.path;
+      document.getElementById("folderPath").textContent = d.path;
+    }
+  }
+
+  function setProgress(pct, state, cls) {
+    const fill = document.getElementById("progressFill");
+    const w = (cls === "done" || cls === "error") ? 100 : Math.max(0, Math.min(100, pct));
+    fill.style.width = w + "%";
+    fill.classList.toggle("done", cls === "done");
+    fill.classList.toggle("error", cls === "error");
+
+    const num = cls === "error" ? "ERROR" : Math.round(cls === "done" ? 100 : pct) + "%";
+    document.getElementById("progressPctBase").textContent = num;
+    const over = document.getElementById("progressPctOver");
+    over.textContent = num;
+    over.style.clipPath = "inset(0 " + (100 - w) + "% 0 0)";
+
+    const st = document.getElementById("progressState");
+    st.textContent = state;
+    st.className = "progress-state" + (cls ? " " + cls : "");
+  }
+
+  function openLog() {
+    const wrap = document.getElementById("logWrap");
+    if (wrap.hidden) {
+      wrap.hidden = false;
+      const t = document.getElementById("logToggle");
+      t.classList.add("open");
+      t.setAttribute("aria-expanded", "true");
+    }
+  }
+
+  function appendLog(text, cls) {
+    const box = document.getElementById("logBox");
+    const div = document.createElement("div");
+    div.className = "log-line" + (cls ? " " + cls : "");
+    div.textContent = text;
+    box.appendChild(div);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  async function startDownload() {
+    const url = document.getElementById("url").value.trim();
+    if (!url) { document.getElementById("url").focus(); return; }
+    if (urlInvalid) { document.getElementById("url").focus(); return; }
+
+    const fmt = document.querySelector('input[name="fmt"]:checked').value;
+    const btn = document.getElementById("dlBtn");
+
+    downloading = true;
+    btn.disabled = true;
+    document.getElementById("progressSection").style.display = "block";
+    document.getElementById("logBox").innerHTML = "";
+    setProgress(0, "Queued", "");
+
+    const r = await fetch("/download", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url, format: fmt, output_path: currentFolder }),
+    });
+
+    const { stream_id, error } = await r.json();
+    if (error) {
+      setProgress(0, "Error: " + error, "error");
+      appendLog("ERROR: " + error, "error");
+      openLog();
+      downloading = false;
+      btn.disabled = false;
+      return;
+    }
+
+    let pct = 0;
+    const es = new EventSource("/progress/" + stream_id);
+    es.onmessage = (e) => {
+      if (e.data.startsWith("__DONE__:")) {
+        es.close();
+        downloading = false;
+        btn.disabled = false;
+        const ok = e.data === "__DONE__:done";
+        if (ok) { setProgress(100, "Done", "done"); appendLog("✓ Done", "done"); }
+        else { setProgress(pct, "Error — check the source", "error"); appendLog("✗ Error — check the source", "error"); openLog(); }
+        loadHistory();
+        return;
+      }
+      const data = e.data;
+      if (!data.trim()) return;
+      appendLog(data, /^ERROR/i.test(data) ? "error" : "");
+      const m = data.match(/\[download\]\s+([\d.]+)%/);
+      if (m) { pct = parseFloat(m[1]); setProgress(pct, "Downloading", ""); return; }
+      if (/\[ExtractAudio\]|Extracting audio|\[ffmpeg\]|Merger|Post-process/i.test(data)) {
+        setProgress(pct, "Converting", ""); return;
+      }
+      if (/^ERROR/i.test(data)) { setProgress(pct, "Error — check the source", "error"); openLog(); return; }
+    };
+    es.onerror = () => {
+      es.close();
+      downloading = false;
+      btn.disabled = false;
+      loadHistory();
+    };
+  }
+
+  async function loadHistory() {
+    const r = await fetch("/history");
+    const items = await r.json();
+    const list = document.getElementById("historyList");
+    if (!items.length) {
+      list.innerHTML = '<li class="empty-history">No downloads yet</li>';
+      return;
+    }
+    list.innerHTML = items.map(item => `
+      <li class="history-item">
+        <span class="hist-name">${item.filename || item.url}</span>
+        <span class="hist-fmt">${item.format.replace("_", " ")}</span>
+        <span class="hist-status ${item.status}">${statusLabel(item.status)}</span>
+      </li>
+    `).join("");
+  }
+
+  function statusLabel(s) {
+    return s === "done" ? "✓" : s === "error" ? "✗" : "…";
+  }
+
+  // ===== Theme toggle (visual only) =====
+  const __themeBtn = document.getElementById("themeToggle");
+  function applyTheme(t) {
+    document.documentElement.setAttribute("data-theme", t);
+    __themeBtn.innerHTML = t === "dark" ? "&#9681; DARK" : "&#9681; LIGHT";
+    try { localStorage.setItem("ytdlp-theme", t); } catch (e) {}
+  }
+  applyTheme((() => { try { return localStorage.getItem("ytdlp-theme"); } catch (e) { return null; } })() || "light");
+  __themeBtn.addEventListener("click", () => {
+    const cur = document.documentElement.getAttribute("data-theme");
+    applyTheme(cur === "dark" ? "light" : "dark");
+  });
+
+  // ===== Output log (collapse + copy) =====
+  const logToggle = document.getElementById("logToggle");
+  logToggle.addEventListener("click", () => {
+    const wrap = document.getElementById("logWrap");
+    const open = wrap.hidden;
+    wrap.hidden = !open;
+    logToggle.classList.toggle("open", open);
+    logToggle.setAttribute("aria-expanded", String(open));
+  });
+
+  document.getElementById("logCopy").addEventListener("click", async () => {
+    const text = document.getElementById("logBox").innerText.trim();
+    if (!text) return;
+    const label = document.getElementById("logCopyLabel");
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (e) {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand("copy"); } catch (err) {}
+      ta.remove();
+    }
+    label.textContent = "Copied";
+    setTimeout(() => { label.textContent = "Copy"; }, 1200);
+  });
+
+  // ===== Supported-sites modal =====
+  const sitesModal = document.getElementById("sitesModal");
+  document.getElementById("infoBtn").addEventListener("click", () => sitesModal.classList.add("open"));
+  document.getElementById("modalClose").addEventListener("click", () => sitesModal.classList.remove("open"));
+  sitesModal.addEventListener("click", (e) => { if (e.target === sitesModal) sitesModal.classList.remove("open"); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") sitesModal.classList.remove("open"); });
+
+  // ===== URL validation (block DRM-only services) =====
+  // yt-dlp has no extractor for these — they are DRM-protected streaming.
+  const UNSUPPORTED = [
+    [/(^|\.)spotify\.com$/,        "Spotify"],
+    [/(^|\.)music\.apple\.com$/,   "Apple Music"],
+    [/(^|\.)itunes\.apple\.com$/,  "Apple Music"],
+    [/(^|\.)deezer\.com$/,         "Deezer"],
+    [/(^|\.)tidal\.com$/,          "Tidal"],
+    [/music\.amazon\./,            "Amazon Music"],
+    [/(^|\.)pandora\.com$/,        "Pandora"],
+    [/(^|\.)qobuz\.com$/,          "Qobuz"],
+    [/(^|\.)napster\.com$/,        "Napster"],
+    [/(^|\.)audible\.com$/,        "Audible"],
+    [/(^|\.)shazam\.com$/,         "Shazam"],
+  ];
+
+  function hostOf(value) {
+    try {
+      const u = /^[a-z]+:\/\//i.test(value) ? value : "https://" + value;
+      return new URL(u).hostname.replace(/^www\./, "").toLowerCase();
+    } catch (e) { return null; }
+  }
+
+  function validateUrl() {
+    const input = document.getElementById("url");
+    const hint = document.getElementById("urlHint");
+    const value = input.value.trim();
+    let msg = "";
+
+    if (value) {
+      const host = hostOf(value);
+      for (const [re, name] of UNSUPPORTED) {
+        if (host && re.test(host)) { msg = name + " is DRM-protected — can't download from it"; break; }
+      }
+    }
+
+    urlInvalid = !!msg;
+    input.classList.toggle("invalid", urlInvalid);
+    hint.textContent = msg;
+    hint.classList.toggle("show", urlInvalid);
+    if (!downloading) document.getElementById("dlBtn").disabled = urlInvalid;
+  }
+
+  document.getElementById("url").addEventListener("input", validateUrl);
+
+  loadFolder();
+  loadHistory();
+</script>
+</body>
+</html>

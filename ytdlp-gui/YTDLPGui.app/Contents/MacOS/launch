@@ -1,0 +1,15 @@
+#!/bin/bash
+DIR="$(cd "$(dirname "$0")" && pwd)"
+RESOURCES="$DIR/../Resources"
+
+cd "$RESOURCES"
+
+python3 -c "import flask" 2>/dev/null || python3 -m pip install flask --user --quiet
+
+# Kill any existing instance on port 7337
+lsof -ti tcp:7337 | xargs kill -9 2>/dev/null
+
+python3 app.py &
+sleep 2
+open http://localhost:7337
+wait
