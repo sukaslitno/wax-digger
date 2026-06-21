@@ -1,0 +1,14 @@
+# build output
+ytdlp-extension/dist/
+**/node_modules/
+**/web-ext-artifacts/
+*.zip
+*.xpi
+
+# python
+__pycache__/
+*.pyc
+
+# local config / os
+.DS_Store
+~/.ytdlpgui_config.json

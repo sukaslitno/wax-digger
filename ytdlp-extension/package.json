@@ -1,0 +1,11 @@
+{
+  "name": "wax-digger-extension",
+  "version": "1.0.0",
+  "description": "Browser extension for the local YTDLP GUI — popup controls + a ↓ button on badger.greenlight.hr.",
+  "private": true,
+  "scripts": {
+    "icons": "node generate-icons.js",
+    "build": "node build.js",
+    "sign:firefox": "web-ext sign --source-dir dist/firefox --channel unlisted"
+  }
+}
