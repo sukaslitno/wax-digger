@@ -48,7 +48,7 @@ def log(msg):
 
 
 def download(url, dest, attempts=4):
-    log(f"  ↓ {url}")
+    log(f"  downloading {url}")
     last = None
     for i in range(1, attempts + 1):
         try:
@@ -76,7 +76,7 @@ def save_binary(src, name):
     dest = os.path.join(BIN, name + ext)
     shutil.copyfile(src, dest)
     make_executable(dest)
-    log(f"  ✓ bin/{name}{ext}")
+    log(f"  saved bin/{name}{ext}")
 
 
 def extract_from_archive(archive, member_names, out_name):
@@ -141,7 +141,7 @@ def main():
         sys.exit(1)
 
     os.makedirs(BIN, exist_ok=True)
-    log(f"Fetching binaries for {system} → packaging/bin/")
+    log(f"Fetching binaries for {system} -> packaging/bin/")
     fetch_ytdlp(system)
     fetch_ffmpeg(system)
     log("Done.")
