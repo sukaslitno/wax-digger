@@ -6,26 +6,27 @@
  */
 
 .wd-btn {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  z-index: 5;
-  width: 30px;
-  height: 30px;
-  display: flex;
+  /* inline icon button — flows inside the card's action toolbar.
+     width/height/border-radius may be overridden inline to mirror siblings. */
+  flex: 0 0 auto;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
+  vertical-align: middle;
+  box-sizing: border-box;
+  width: 36px;
+  height: 36px;
+  margin: 0 0 0 4px;
   background: #211c13;
   color: #e8e1ce;
   border: 1px solid #211c13;
-  border-radius: 0;
+  border-radius: 8px;
   font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-size: 15px;
   font-weight: 800;
   line-height: 1;
   cursor: pointer;
   padding: 0;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
   opacity: 0.92;
   transition: background 0.15s, color 0.15s, opacity 0.15s, transform 0.1s;
 }
