@@ -35,14 +35,6 @@
     return href.includes("bandcamp.com") ? href : null;
   }
 
-  function findCard(link) {
-    return (
-      link.closest(
-        '[class*="card" i], [class*="album" i], [class*="release" i], [class*="item" i], article, li'
-      ) || link.parentElement
-    );
-  }
-
   function scan(root) {
     const links = (root.querySelectorAll
       ? root.querySelectorAll('a[href*="bandcamp.com"]')
@@ -50,19 +42,31 @@
     links.forEach((link) => {
       const url = findBandcampUrl(link);
       if (!url) return;
-      const card = findCard(link);
-      if (!card || processed.has(card)) return;
-      processed.add(card);
-      injectButton(card, url);
+      // anchor on the actual control wrapping the link (or the link itself),
+      // so we land *inside* the card's action toolbar instead of floating over it.
+      const anchor = link.closest("button, a") || link;
+      if (processed.has(anchor)) return;
+      processed.add(anchor);
+      injectButton(anchor, url);
     });
   }
 
   // ---------- button injection ----------
-  function injectButton(card, url) {
-    if (getComputedStyle(card).position === "static") {
-      card.style.position = "relative";
+  // Find a sibling control whose size/shape we can mirror, so our button blends
+  // into the existing toolbar instead of being a mismatched square.
+  function siblingControl(anchor) {
+    const parent = anchor.parentElement;
+    if (!parent) return null;
+    for (const el of parent.children) {
+      if (el === anchor) continue;
+      if (el.tagName === "BUTTON" || el.tagName === "A" || el.querySelector("svg, img")) {
+        return el;
+      }
     }
+    return null;
+  }
 
+  function injectButton(anchor, url) {
     const btn = document.createElement("button");
     btn.className = "wd-btn";
     btn.type = "button";
@@ -70,13 +74,26 @@
     btn.textContent = "↓";
     btn.dataset.wdUrl = url;
 
+    // mirror a neighbouring toolbar button's footprint when we can
+    const sib = siblingControl(anchor);
+    if (sib) {
+      const cs = getComputedStyle(sib);
+      const w = parseFloat(cs.width);
+      const h = parseFloat(cs.height);
+      if (w > 0 && w < 200) btn.style.width = cs.width;
+      if (h > 0 && h < 200) btn.style.height = cs.height;
+      if (cs.borderRadius && cs.borderRadius !== "0px") {
+        btn.style.borderRadius = cs.borderRadius;
+      }
+    }
+
     btn.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
       togglePopup(btn, url);
     });
 
-    card.appendChild(btn);
+    anchor.insertAdjacentElement("afterend", btn);
   }
 
   // ---------- mini-popup ----------
