@@ -34,8 +34,11 @@ YTDLP = {
 # macOS: ffmpeg-static ships a native, dependency-free binary per arch
 #        (evermeet's cookie-on-302 flow breaks urllib). ffprobe isn't included,
 #        which is fine — yt-dlp only needs ffmpeg for our re-encode extraction.
-FFMPEG_WIN = "https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip"
-FFMPEG_LINUX = "https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-linux64-gpl.tar.xz"
+# NB: BtbN's rolling build lives under the explicit "latest" *tag*, not GitHub's
+# /releases/latest/ (which resolves to the stable nX.Y release that lacks the
+# master-* assets -> 404).
+FFMPEG_WIN = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+FFMPEG_LINUX = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz"
 
 
 def ffmpeg_mac_url():
