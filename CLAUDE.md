@@ -8,10 +8,10 @@ wax-digger/
 ├── ytdlp-extension/        # Браузерное расширение Chrome и Firefox
 │   ├── build.js            # Сборщик — генерирует dist/
 │   ├── manifest.json       # Manifest V3 (Chrome) + патч для Firefox
-│   ├── background.js       # Service worker / background page
+│   ├── background.js       # Service worker
 │   ├── content.js          # Инжектируемый скрипт (кнопка на страницах)
 │   ├── popup.html          # UI попапа расширения
-│   └── scripts/            # make-safari.sh и вспомогательные скрипты
+│   └── scripts/            # Вспомогательные скрипты
 ├── packaging/
 │   ├── build_macos.sh      # PyInstaller → WaxDigger.dmg
 │   └── build_windows.ps1   # PyInstaller → WaxDigger.exe
@@ -36,20 +36,38 @@ wax-digger/
    ```bash
    git checkout -b feature/<краткое-название-задачи>
    ```
-3. Сделать изменения, коммитить с понятными сообщениями на английском.
+3. Сделать изменения, коммитить с понятными сообщениями.
 4. Запушить ветку:
    ```bash
    git push origin feature/<название>
    ```
 5. Сообщить пользователю — готово к PR в `dev`.
 
+## Формат коммит-сообщений
+
+```
+feat: короткое описание       # новая функциональность
+fix: короткое описание        # исправление бага
+chore: короткое описание      # техническая работа, зависимости
+docs: короткое описание       # документация
+refactor: короткое описание   # рефакторинг без изменения поведения
+```
+
+Примеры:
+```
+feat: add download progress bar to web UI
+fix: correct SSE stream closing on error
+chore: update yt-dlp to 2025.06.01
+```
+
 ## Запрещено
 
-- `git push origin main` — пушить в main напрямую
+- `git push origin main` — пушить в `main` напрямую
 - `git push --force` — принудительный push
 - `git branch -D` — принудительное удаление веток
 - Коммитить в `main` напрямую, минуя PR
 - Смешивать изменения разных компонентов в одной feature-ветке
+- Добавлять в репозиторий любые файлы агента, AI-инструментов или сессий
 
 ## Компоненты и где что менять
 
@@ -57,11 +75,11 @@ wax-digger/
 |---|---|---|
 | GUI-сервер | `ytdlp-gui/app.py` | Flask backend, логика загрузки через yt-dlp |
 | Веб-UI | `ytdlp-gui/templates/index.html` | Интерфейс Flask-приложения |
-| Расширение | `ytdlp-extension/` | Chrome/Firefox extension — content script, popup, background |
-| Сборка расширения | `ytdlp-extension/build.js` | Генерирует `dist/wax-digger-chrome.zip` и Firefox-пакет |
-| macOS-билд | `packaging/build_macos.sh` | PyInstaller + создание DMG |
+| Расширение | `ytdlp-extension/` | Chrome/Firefox extension |
+| Сборка ext | `ytdlp-extension/build.js` | Генерирует `dist/` zip-пакеты |
+| macOS-билд | `packaging/build_macos.sh` | PyInstaller + DMG |
 | Windows-билд | `packaging/build_windows.ps1` | PyInstaller → portable EXE |
-| CI/CD | `.github/workflows/release.yml` | GitHub Actions: extension + DMG + EXE → GitHub Release |
+| CI/CD | `.github/workflows/release.yml` | GitHub Actions → GitHub Release |
 
 ## Платформы macOS / Windows
 
@@ -71,28 +89,24 @@ wax-digger/
 ```bash
 bash packaging/build_macos.sh       # macOS → dist/WaxDigger.dmg
 pwsh packaging/build_windows.ps1    # Windows → dist/WaxDigger.exe
-```
-
-Расширение:
-```bash
-cd ytdlp-extension && node build.js  # → dist/wax-digger-chrome.zip + firefox-пакет
+cd ytdlp-extension && node build.js # → dist/ zip-пакеты
 ```
 
 ## Как делать релиз
 
-1. Убедиться что `dev` стабилен (все тесты проходят, артефакты собираются локально).
-2. Смержить `dev` в `main` через PR на GitHub — **не напрямую**.
-3. После merge поставить тег и запушить его:
+1. Убедиться что `dev` стабилен — проверить локальную сборку на нужной платформе.
+2. Смержить `dev` в `main` через PR на GitHub — не напрямую.
+3. После merge поставить тег:
    ```bash
    git checkout main && git pull origin main
    git tag vX.X.X
    git push origin vX.X.X
    ```
-4. GitHub Actions автоматически соберёт DMG, EXE, zip расширений и создаст GitHub Release.
+4. GitHub Actions автоматически соберёт DMG, EXE, zip расширений и создаст Release.
 
 ## Безопасность
 
-- Секреты хранятся **только** в GitHub Actions Secrets, не в коде репозитория.
-- `AMO_JWT_ISSUER` / `AMO_JWT_SECRET` — для подписи Firefox-расширения через AMO API.
-- `.env` файлы и `.wax-digger_config.json` перечислены в `.gitignore` — никогда не коммитить.
-- **Остаточный риск:** actions в `release.yml` закреплены по version tag (`@v4`, `@v2`), не по commit SHA. При следующем рефакторинге CI рекомендуется закрепить по SHA для защиты от supply chain атак.
+- Секреты хранятся только в GitHub Actions Secrets, не в коде.
+- `AMO_JWT_ISSUER` / `AMO_JWT_SECRET` — для подписи Firefox через AMO API.
+- `.env` и `.wax-digger_config.json` в `.gitignore` — никогда не коммитить.
+- **Остаточный риск:** actions в `release.yml` закреплены по version tag (`@v4`, `@v2`), не по SHA. При следующем рефакторинге CI — закрепить по SHA.
