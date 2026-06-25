@@ -24,3 +24,10 @@ __pycache__/
 
 # local python venv
 .venv/
+
+# agent / AI tool files (local only, not for version control)
+CLAUDE.md
+.claude/
+.aider*
+.cursorrules
+*.claude_session
