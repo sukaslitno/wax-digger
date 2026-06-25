@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Wax Digger",
   "version": "1.0.1",
-  "description": "Download albums & tracks through your local YTDLP GUI — popup controls plus a one-click ↓ button on badger.greenlight.hr.",
+  "description": "Download albums & tracks through your local Wax Digger app — popup controls plus a one-click ↓ button on badger.greenlight.hr.",
   "action": {
     "default_popup": "popup.html",
     "default_title": "Wax Digger",

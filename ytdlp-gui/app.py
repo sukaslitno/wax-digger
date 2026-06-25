@@ -76,9 +76,9 @@ def find_ffmpeg_location():
 YTDLP_CMD = find_ytdlp()
 FFMPEG_LOCATION = find_ffmpeg_location()
 
-CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".ytdlpgui_config.json")
+CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".wax-digger_config.json")
 DEFAULT_FOLDER = os.path.join(os.path.expanduser("~"), "Downloads")
-TEMP_DIR = os.path.join(tempfile.gettempdir(), "ytdlp-gui-temp")
+TEMP_DIR = os.path.join(tempfile.gettempdir(), "wax-digger-temp")
 
 app = Flask(__name__, template_folder=os.path.join(RES, "templates"))
 

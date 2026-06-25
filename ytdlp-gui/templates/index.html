@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>YTDLP GUI</title>
+  <title>Wax Digger</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600;700;800&display=swap');
 
@@ -803,9 +803,9 @@
   function applyTheme(t) {
     document.documentElement.setAttribute("data-theme", t);
     __themeBtn.innerHTML = t === "dark" ? "&#9681; DARK" : "&#9681; LIGHT";
-    try { localStorage.setItem("ytdlp-theme", t); } catch (e) {}
+    try { localStorage.setItem("wax-digger-theme", t); } catch (e) {}
   }
-  applyTheme((() => { try { return localStorage.getItem("ytdlp-theme"); } catch (e) { return null; } })() || "light");
+  applyTheme((() => { try { return localStorage.getItem("wax-digger-theme"); } catch (e) { return null; } })() || "light");
   __themeBtn.addEventListener("click", () => {
     const cur = document.documentElement.getAttribute("data-theme");
     applyTheme(cur === "dark" ? "light" : "dark");
