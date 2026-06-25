@@ -1,5 +1,5 @@
 /*
- * background.js — service worker / API client for the local YTDLP GUI server.
+ * background.js — service worker / API client for the local Wax Digger server.
  *
  * All network traffic goes through here. Because the server hosts are listed in
  * `host_permissions`, fetches from this worker bypass page CORS entirely, so the

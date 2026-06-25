@@ -19,7 +19,7 @@ done
 
 pyinstaller --noconfirm --windowed --name "$APP" \
   --icon packaging/icon.icns \
-  --osx-bundle-identifier hr.greenlight.waxdigger \
+  --osx-bundle-identifier io.github.sukaslitno.waxdigger \
   --add-data "ytdlp-gui/templates:templates" \
   "${BIN_ARGS[@]}" \
   ytdlp-gui/app.py

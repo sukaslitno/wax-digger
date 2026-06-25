@@ -1,7 +1,12 @@
 {
   "name": "wax-digger-extension",
-  "version": "1.0.0",
-  "description": "Browser extension for the local YTDLP GUI — popup controls + a ↓ button on badger.greenlight.hr.",
+  "version": "1.0.1",
+  "description": "Browser extension for the local Wax Digger app — popup controls + a ↓ button on badger.greenlight.hr.",
+  "author": "sukaslitno",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sukaslitno/wax-digger.git"
+  },
   "private": true,
   "scripts": {
     "icons": "node generate-icons.js",

@@ -69,7 +69,7 @@ function patchFirefoxManifest(dir) {
 
   m.browser_specific_settings = {
     gecko: {
-      id: "wax-digger@greenlight.local",
+      id: "wax-digger@sukaslitno.github.io",
       strict_min_version: "115.0",
     },
   };

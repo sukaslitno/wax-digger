@@ -24,7 +24,7 @@ rm -rf dist/safari
 xcrun safari-web-extension-converter dist/chrome \
   --project-location dist/safari \
   --app-name "Wax Digger" \
-  --bundle-identifier "hr.greenlight.waxdigger" \
+  --bundle-identifier "io.github.sukaslitno.waxdigger" \
   --no-open --force --macos-only
 
 echo

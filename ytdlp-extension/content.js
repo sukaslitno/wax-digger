@@ -5,7 +5,7 @@
  * For every card that contains a bandcamp.com link we drop a small ↓ button.
  * Clicking it opens a mini-popup with a format picker; picking a format sends
  * the bandcamp URL to the local YTDLP server (via background.js). If the server
- * isn't running, the mini-popup shows a "Launch YTDLP GUI" action instead.
+ * isn't running, the mini-popup shows a "Launch Wax Digger" action instead.
  *
  * The page is a SPA, so cards arrive/refresh continuously — a MutationObserver
  * keeps re-scanning.
@@ -161,7 +161,7 @@
     const launch = document.createElement("button");
     launch.className = "wd-launch";
     launch.type = "button";
-    launch.textContent = "Launch YTDLP GUI";
+    launch.textContent = "Launch Wax Digger";
     launch.addEventListener("click", async (e) => {
       e.stopPropagation();
       await ask("openGui");

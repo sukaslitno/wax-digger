@@ -1,6 +1,6 @@
 # Wax Digger — Browser Extension
 
-Companion extension for the local **YTDLP GUI** server (`127.0.0.1:7337`). It
+Companion extension for the local **Wax Digger** server (`127.0.0.1:7337`). It
 mirrors the app's paper/VFD look (JetBrains Mono, cream + ink palette, sharp
 corners) and adds:
 
@@ -16,9 +16,9 @@ Safari** (one codebase; per-browser packages are built automatically).
 
 ## Install (for users)
 
-> ⚠️ The extension only *controls* the local server — the **YTDLP GUI** app must
+> ⚠️ The extension only *controls* the local server — the **Wax Digger** app must
 > be running for downloads to work. If it's off, the extension shows a
-> **Launch YTDLP GUI** button.
+> **Launch Wax Digger** button.
 
 ### Easiest: from the GitHub Releases page
 
