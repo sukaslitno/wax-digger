@@ -112,8 +112,12 @@ def pick_folder():
     """Open a native folder picker for the current OS. Returns a path or ""."""
     try:
         if sys.platform == "darwin":
-            script = 'tell application "Finder" to set f to choose folder\nPOSIX path of f'
-            r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+            r = subprocess.run(
+                ["osascript",
+                 "-e", 'tell application "Finder" to activate',
+                 "-e", 'POSIX path of (choose folder with prompt "Select output folder:")'],
+                capture_output=True, text=True,
+            )
             return r.stdout.strip()
         if IS_WINDOWS:
             ps = (
