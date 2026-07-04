@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import webbrowser
 
 from flask import Flask, Response, jsonify, render_template, request
@@ -288,12 +289,41 @@ def _port_in_use():
         return s.connect_ex((HOST, PORT)) == 0
 
 
+def open_browser(url):
+    """Open the default browser with a platform-native launcher.
+
+    webbrowser.open() is unreliable inside a GUI-launched (LaunchServices)
+    frozen .app: the daemon thread's environment lacks PATH/$BROWSER, so the
+    call fails silently and the UI never opens even though the server is up.
+    Shelling out to the OS launcher (absolute path on macOS) avoids that.
+    """
+    try:
+        if sys.platform == "darwin":
+            subprocess.Popen(["/usr/bin/open", url])
+        elif IS_WINDOWS:
+            os.startfile(url)  # type: ignore[attr-defined]
+        else:
+            subprocess.Popen(["xdg-open", url])
+    except Exception:
+        webbrowser.open(url)  # best-effort fallback
+
+
+def _open_when_ready():
+    # Wait until the server actually answers before opening, instead of a fixed
+    # delay that can fire before Flask is listening.
+    for _ in range(50):  # up to ~10s
+        if _port_in_use():
+            break
+        time.sleep(0.2)
+    open_browser(URL)
+
+
 def main():
     # If an instance is already running, just surface its window and exit.
     if _port_in_use():
-        webbrowser.open(URL)
+        open_browser(URL)
         return
-    threading.Timer(1.2, lambda: webbrowser.open(URL)).start()
+    threading.Thread(target=_open_when_ready, daemon=True).start()
     app.run(host=HOST, port=PORT, debug=False)
 
 
