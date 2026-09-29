@@ -1,900 +1,566 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>YTDLP GUI</title>
-  <style>
-    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600;700;800&display=swap');
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WAX</title>
+<style>
+@font-face {
+  font-family: 'DM Mono';
+  font-style: normal; font-weight: 400; font-display: swap;
+  src: url('dm-mono.woff2') format('woff2');
+}
 
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-    /* ===== Light theme (paper / VFD) ===== */
-    :root, [data-theme="light"] {
-      --bg: #e8e1ce;
-      --surface: #e0d8c2;
-      --surface-2: #d6cdb4;
-      --text: #211c13;
-      --muted: #7a715a;
-      --faint: #a99e80;
-      --border: #211c13;
-      --border-soft: rgba(33, 28, 19, 0.22);
-      --accent: #211c13;
-      --accent-text: #e8e1ce;
-      --ok: #2f7a32;
-      --err: #b3261e;
-    }
+:root {
+  --blue: #68D0ED;
+  --yellow: #D9EF71;
+  --red: #FF4C4D;
+  --edge-white: #6A6A6A;
+  --edge-white-hover: #7A7A7A;
+  --edge-yellow: #6F7B39;
+  --edge-yellow-hover: #ABBE58;
+  --edge-red: #822526;
+  --glow-done: #CCE168;
+}
 
-    /* ===== Dark theme = inverted light ===== */
-    [data-theme="dark"] {
-      --bg: #211c13;
-      --surface: #29241a;
-      --surface-2: #322c20;
-      --text: #e8e1ce;
-      --muted: #9a9078;
-      --faint: #6b6450;
-      --border: #e8e1ce;
-      --border-soft: rgba(232, 225, 206, 0.22);
-      --accent: #e8e1ce;
-      --accent-text: #211c13;
-      --ok: #6ad06d;
-      --err: #ff6a60;
-    }
+html, body {
+  width: 100%; height: 100%;
+  background: transparent;
+  overflow: hidden;
+  -webkit-user-select: none; user-select: none;
+}
 
-    :root { --ctl-h: 48px; }
+.modal {
+  width: 600px; height: 100%;
+  border-radius: 64px;
+  background: #000;
+  position: relative; overflow: hidden;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 32px; padding: 32px;
+  font: 400 16px/normal 'DM Mono', ui-monospace, monospace;
+  letter-spacing: -0.06em; color: #fff;
+  -webkit-font-smoothing: antialiased;
+}
 
-    body {
-      font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
-      font-weight: 600;
-      background: var(--bg);
-      color: var(--text);
-      min-height: 100vh;
-      display: flex;
-      justify-content: center;
-      padding: 40px 16px;
-      transition: background-color 0.2s, color 0.2s;
-      -webkit-font-smoothing: antialiased;
-    }
+.logo { width: 268px; height: 100px; flex-shrink: 0; -webkit-user-drag: none; }
 
-    .container { width: 100%; max-width: 600px; }
+.ic24 { display: inline-flex; width: 24px; height: 24px; flex-shrink: 0; }
+.ic24 svg { width: 24px; height: 24px; display: block; }
 
-    /* ===== Theme toggle (fixed, top-right corner) ===== */
-    .theme-toggle {
-      position: fixed;
-      top: 16px;
-      right: 16px;
-      z-index: 10;
-      font-family: inherit;
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      background: var(--surface);
-      color: var(--text);
-      border: 1px solid var(--border);
-      border-radius: 0;
-      height: 32px;
-      padding: 0 12px;
-      cursor: pointer;
-      transition: background 0.15s, color 0.15s;
-    }
-    .theme-toggle:hover { background: var(--accent); color: var(--accent-text); }
+.modal__corner {
+  position: absolute; top: 32px; right: 32px;
+  width: 24px; height: 24px; z-index: 20;
+  border: 0; background: none; padding: 0; cursor: pointer; color: #fff;
+  opacity: .48; transition: opacity .15s ease;
+}
+.modal__corner:hover { opacity: 1; }
+.modal__corner--close { opacity: 1; }
 
-    h1 {
-      font-size: clamp(40px, 11vw, 66px);
-      font-weight: 800;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      text-align: center;
-      color: var(--text);
-      margin: 8px 0 40px;
-      line-height: 1.02;
-    }
-    h1 .cursor { animation: blink 1.1s steps(1) infinite; }
-    @keyframes blink { 0%, 50% { opacity: 1; } 50.01%, 100% { opacity: 0; } }
+/* ===== button-large ===== */
+.btn {
+  position: relative; isolation: isolate; overflow: hidden;
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 6px; height: 64px; padding: 2px 24px;
+  border: 0; border-radius: 999px; background: transparent;
+  font: 400 16px/normal 'DM Mono', ui-monospace, monospace;
+  letter-spacing: -0.06em; cursor: pointer; white-space: nowrap;
+  flex-shrink: 0;
+}
+.btn--full { width: 100%; }
+.btn::before, .btn::after {
+  content: ""; position: absolute; inset: 0; z-index: -1;
+  border-radius: inherit; transition: opacity .15s ease;
+}
+.btn::before {
+  background: radial-gradient(ellipse 72.9% 50% at 50% 50%, #000 0%, var(--edge) 100%);
+  opacity: .55;
+}
+.btn::after {
+  background: radial-gradient(ellipse 72.9% 50% at 50% 50%, #000 0%, var(--edge-hover, var(--edge)) 100%);
+  opacity: 0;
+}
+.btn:hover::after, .btn:active::after { opacity: 1; }
 
-    .section { margin-bottom: 22px; }
+.btn--white  { --edge: var(--edge-white); --edge-hover: var(--edge-white-hover); color: #fff; }
+.btn--yellow { --edge: var(--edge-yellow); --edge-hover: var(--edge-yellow-hover); color: var(--yellow); }
+.btn--red    { --edge: var(--edge-red); color: var(--red); }
+.btn--brand  { color: #fff; flex: 1; padding: 2px; }
 
-    /* ===== Field labels ===== */
-    .section > label {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-      color: var(--muted);
-      margin-bottom: 10px;
-    }
-    .section > label::before { content: "\25B8"; color: var(--text); }
-    .section > label::after {
-      content: "";
-      flex: 1;
-      border-bottom: 1px dotted var(--border-soft);
-    }
-    .section > label .hint {
-      text-transform: none;
-      letter-spacing: 0;
-      font-weight: 600;
-      font-size: 11px;
-      color: var(--faint);
-    }
+.btn:disabled { opacity: .24; cursor: default; pointer-events: none; }
 
-    /* ===== Text input ===== */
-    input[type="text"] {
-      width: 100%;
-      height: var(--ctl-h);
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 0;
-      padding: 0 16px;
-      font-size: 14px;
-      font-weight: 600;
-      font-family: inherit;
-      color: var(--text);
-      outline: none;
-      transition: box-shadow 0.15s;
-    }
-    input[type="text"]:focus { box-shadow: inset 0 0 0 1px var(--accent); }
-    input[type="text"]::placeholder { color: var(--faint); font-weight: 500; }
+/* ===== input ===== */
+.input {
+  position: relative; isolation: isolate; overflow: hidden;
+  display: flex; align-items: center; gap: 16px;
+  height: 64px; padding: 8px 8px 8px 16px; border-radius: 999px;
+}
+.input::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit;
+  background: radial-gradient(ellipse 72.9% 50% at 50% 50%, #000 0%, var(--edge-white) 100%);
+  opacity: .16; transition: opacity .15s ease, background .15s ease;
+}
+.input__icon { color: var(--blue); }
+.input input {
+  flex: 1; min-width: 1px; background: none; border: 0; outline: none;
+  font: inherit; letter-spacing: -0.06em; color: #fff;
+  text-overflow: ellipsis; white-space: nowrap; caret-color: #fff;
+  -webkit-user-select: text; user-select: text;
+}
+.input input::placeholder { color: rgba(255, 255, 255, .48); }
+.input__chip { height: 48px; }
 
-    /* ===== Segment control (format) ===== */
-    .segment {
-      display: flex;
-      height: var(--ctl-h);
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 0;
-      overflow: hidden;
-    }
-    .segment input[type="radio"] { display: none; }
-    .segment label {
-      flex: 1;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      height: 100%;
-      font-size: 13px;
-      font-weight: 700;
-      letter-spacing: 0.02em;
-      text-transform: uppercase;
-      color: var(--muted);
-      cursor: pointer;
-      transition: color 0.15s, background 0.15s;
-      border-right: 1px solid var(--border);
-    }
-    .segment label:last-of-type { border-right: none; }
-    .segment input[type="radio"]:checked + label {
-      background: var(--accent);
-      color: var(--accent-text);
-    }
+.input[data-state="error"]::before {
+  background: radial-gradient(ellipse 50% 50% at 50% 50%, #000 0%, var(--red) 100%);
+  opacity: .08;
+}
+.input[data-state="error"] .input__icon { color: var(--red); }
+.input[data-state="error"] input { color: var(--red); }
+.input[data-state="error"] .input__chip { opacity: .24; pointer-events: none; }
 
-    /* ===== Folder row ===== */
-    .folder-row { display: flex; align-items: center; gap: 10px; }
-    .folder-path {
-      flex: 1;
-      display: flex;
-      align-items: center;
-      height: var(--ctl-h);
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 0;
-      padding: 0 16px;
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--muted);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
+/* ===== layout ===== */
+.stack { display: flex; flex-direction: column; gap: 12px; width: 536px; }
+.row   { display: flex; gap: 4px; width: 536px; }
+.row--info { gap: 4px; }
+#urlInput { width: 536px; }
+#folderInput { flex: 1; min-width: 1px; }
 
-    .btn-secondary {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      height: var(--ctl-h);
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 0;
-      padding: 0 18px;
-      font-size: 13px;
-      font-weight: 700;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      font-family: inherit;
-      color: var(--text);
-      cursor: pointer;
-      white-space: nowrap;
-      transition: background 0.15s, color 0.15s;
-    }
-    .btn-secondary:hover { background: var(--accent); color: var(--accent-text); }
-    .btn-secondary .ico { flex-shrink: 0; }
+/* ===== progress overlay ===== */
+.progress { position: absolute; inset: 0; pointer-events: none; z-index: 10; }
+.progress svg { width: 100%; height: 100%; display: block; }
+.progress path {
+  fill: none; stroke: var(--yellow); stroke-width: 6;
+  stroke-dasharray: 100;
+  stroke-dashoffset: calc(100 - var(--p, 0));
+  transition: stroke-dashoffset .25s ease;
+}
+.progress__glow {
+  position: absolute; inset: 0; border-radius: 64px; opacity: 0;
+  background: radial-gradient(ellipse 50% 50% at 50% 50%, #000 0%, var(--glow-done) 100%);
+  transition: opacity .3s ease;
+}
+.progress[hidden] { display: none; }
+.progress[data-state="done"] .progress__glow { opacity: .08; }
+.progress[data-state="error"] .progress__glow {
+  opacity: .08;
+  background: radial-gradient(ellipse 50% 50% at 50% 50%, #000 0%, var(--red) 100%);
+}
+.progress[data-state="error"] path { stroke: none; }
 
-    /* ===== Primary button ===== */
-    .btn-primary {
-      width: 100%;
-      height: var(--ctl-h);
-      background: var(--accent);
-      border: 1px solid var(--accent);
-      border-radius: 0;
-      font-size: 14px;
-      font-weight: 800;
-      letter-spacing: 0.18em;
-      text-transform: uppercase;
-      font-family: inherit;
-      color: var(--accent-text);
-      cursor: pointer;
-      transition: background 0.15s, color 0.15s, opacity 0.15s;
-    }
-    .btn-primary:hover { background: var(--bg); color: var(--accent); }
-    .btn-primary:disabled {
-      opacity: 0.4;
-      cursor: not-allowed;
-      background: var(--accent);
-      color: var(--accent-text);
-    }
+/* ===== info screen ===== */
+.info__text { display: flex; flex-direction: column; gap: 12px; width: 536px; text-align: center; }
+.info__text p { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.info__made { font-size: 14px; opacity: .24; }
 
-    /* ===== Progress bar ===== */
-    .progress-row { display: flex; }
-    .progress-track {
-      position: relative;
-      flex: 1;
-      height: var(--ctl-h);
-      background: var(--surface-2);
-      border: 1px solid var(--border);
-      overflow: hidden;
-    }
-    .progress-fill {
-      position: absolute;
-      left: 0;
-      top: 0;
-      bottom: 0;
-      width: 0%;
-      background: var(--accent);
-      transition: width 0.25s ease, background-color 0.2s;
-    }
-    .progress-fill.done  { background: var(--ok); }
-    .progress-fill.error { background: var(--err); }
-    .progress-num {
-      position: absolute;
-      inset: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 16px;
-      font-weight: 800;
-      letter-spacing: 0.06em;
-      pointer-events: none;
-    }
-    .progress-num-base { color: var(--text); }
-    .progress-num-over {
-      color: var(--accent-text);
-      clip-path: inset(0 100% 0 0);
-      transition: clip-path 0.25s ease;
-    }
-    .progress-state {
-      margin-top: 10px;
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-      color: var(--muted);
-    }
-    .progress-state.done  { color: var(--ok); }
-    .progress-state.error { color: var(--err); }
+/* ===== window controls (frameless window has no titlebar) ===== */
+.wintools { position: absolute; top: 0; left: 0; right: 0; height: 48px; z-index: 15; }
+.wintools__bar {
+  position: absolute; top: 20px; z-index: 16;
+  display: flex; align-items: center;
+  opacity: 0; pointer-events: none; transition: opacity .15s ease;
+}
+.wintools__bar.is-visible { opacity: 1; pointer-events: auto; }
+.wintools__btn { border: 0; background: none; padding: 0; cursor: pointer; display: flex; }
+.wintools__dot, .wintools__ic { display: none; }
 
-    /* ===== History ===== */
-    .history-list { list-style: none; }
-    .history-item {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 11px 0;
-      border-bottom: 1px dotted var(--border-soft);
-      font-size: 13px;
-      font-weight: 600;
-    }
-    .history-item:last-child { border-bottom: none; }
-    .hist-name {
-      flex: 1;
-      color: var(--text);
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .hist-fmt {
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.06em;
-      color: var(--muted);
-      text-transform: uppercase;
-      flex-shrink: 0;
-    }
-    .hist-status {
-      font-size: 13px;
-      font-weight: 800;
-      flex-shrink: 0;
-      width: 16px;
-      text-align: center;
-    }
-    .hist-status.done        { color: var(--ok); }
-    .hist-status.error       { color: var(--err); }
-    .hist-status.downloading { color: var(--text); }
+/* macOS: traffic lights, glyphs appear on hovering the group — as in the system */
+.wintools[data-os="mac"] .wintools__bar { left: 24px; gap: 8px; }
+.wintools[data-os="mac"] .wintools__dot {
+  display: flex; width: 12px; height: 12px; border-radius: 50%;
+  align-items: center; justify-content: center;
+}
+.wintools__btn--close .wintools__dot { background: #FF5F57; }
+.wintools__btn--min .wintools__dot { background: #FEBC2E; }
+.wintools__dot svg {
+  width: 12px; height: 12px; display: block;
+  color: rgba(0, 0, 0, .55); opacity: 0; transition: opacity .15s ease;
+}
+.wintools__bar:hover .wintools__dot svg { opacity: 1; }
 
-    .empty-history {
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      color: var(--faint);
-      text-align: center;
-      padding: 18px 0;
-    }
+/* Windows / Linux: [minimize][close] on the right, DS icon style */
+.wintools[data-os="win"] .wintools__bar { right: 24px; gap: 4px; flex-direction: row-reverse; }
+.wintools[data-os="win"] .wintools__ic { display: inline-flex; }
+.wintools__ic { color: #fff; opacity: .48; transition: opacity .15s ease, color .15s ease; }
+.wintools__btn:hover .wintools__ic { opacity: 1; }
+.wintools__btn--close:hover .wintools__ic { color: var(--red); }
 
-    /* ===== Output log (collapsible) ===== */
-    .log-toggle {
-      display: flex;
-      align-items: center;
-      gap: 9px;
-      width: 100%;
-      margin-top: 16px;
-      padding: 6px 0;
-      background: transparent;
-      border: none;
-      font-family: inherit;
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      color: var(--muted);
-      cursor: pointer;
-      transition: color 0.15s;
-    }
-    .log-toggle:hover { color: var(--text); }
-    .log-toggle .tri {
-      display: inline-block;
-      color: var(--text);
-      transition: transform 0.15s;
-    }
-    .log-toggle.open .tri { transform: rotate(90deg); }
-    .log-toggle::after {
-      content: "";
-      flex: 1;
-      border-bottom: 1px dotted var(--border-soft);
-    }
-    .log-wrap { margin-top: 10px; }
-    .log-box {
-      height: 160px;
-      overflow-y: auto;
-      background: var(--surface-2);
-      border: 1px solid var(--border);
-      padding: 12px 14px;
-      font-size: 12px;
-      font-weight: 600;
-      line-height: 1.65;
-      color: var(--muted);
-      word-break: break-word;
-    }
-    .log-box::-webkit-scrollbar { width: 8px; }
-    .log-box::-webkit-scrollbar-thumb { background: var(--border-soft); }
-    .log-line::before { content: "\203A "; color: var(--faint); }
-    .log-line.done { color: var(--ok); }
-    .log-line.error { color: var(--err); }
-    .log-actions { display: flex; justify-content: flex-end; margin-top: 8px; }
-    .log-copy {
-      display: inline-flex;
-      align-items: center;
-      gap: 7px;
-      height: 34px;
-      padding: 0 14px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 0;
-      font-family: inherit;
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: var(--text);
-      cursor: pointer;
-      transition: background 0.15s, color 0.15s;
-    }
-    .log-copy:hover { background: var(--accent); color: var(--accent-text); }
-    .log-copy svg { flex-shrink: 0; }
+/* the (i)/(x) corner would collide with the close button on Windows */
+.modal[data-tools="on"] .modal__corner { opacity: 0; pointer-events: none; }
 
-    /* ===== Info icon in label ===== */
-    .info-btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 18px;
-      height: 18px;
-      padding: 0;
-      border: 1px solid var(--border);
-      border-radius: 50%;
-      background: transparent;
-      color: var(--text);
-      font-family: inherit;
-      font-size: 11px;
-      font-weight: 800;
-      line-height: 1;
-      text-transform: lowercase;
-      letter-spacing: 0;
-      cursor: pointer;
-      flex-shrink: 0;
-      transition: background 0.15s, color 0.15s;
-    }
-    .info-btn:hover { background: var(--accent); color: var(--accent-text); }
-
-    /* ===== Input validation ===== */
-    input[type="text"].invalid {
-      border-color: var(--err);
-      box-shadow: inset 0 0 0 1px var(--err);
-    }
-    .field-hint {
-      display: none;
-      margin-top: 8px;
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.04em;
-      color: var(--err);
-    }
-    .field-hint.show { display: block; }
-
-    /* ===== Supported-sites modal ===== */
-    .modal-overlay {
-      position: fixed;
-      inset: 0;
-      z-index: 50;
-      display: none;
-      align-items: center;
-      justify-content: center;
-      padding: 20px;
-      background: rgba(33, 28, 19, 0.55);
-    }
-    [data-theme="dark"] .modal-overlay { background: rgba(0, 0, 0, 0.6); }
-    .modal-overlay.open { display: flex; }
-    .modal {
-      width: 100%;
-      max-width: 520px;
-      max-height: 82vh;
-      overflow-y: auto;
-      background: var(--bg);
-      border: 1px solid var(--border);
-    }
-    .modal-head {
-      position: sticky;
-      top: 0;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 16px 18px;
-      background: var(--bg);
-      border-bottom: 1px solid var(--border);
-      font-size: 13px;
-      font-weight: 800;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-    }
-    .modal-close {
-      background: transparent;
-      border: none;
-      color: var(--text);
-      font-family: inherit;
-      font-size: 16px;
-      font-weight: 700;
-      line-height: 1;
-      cursor: pointer;
-    }
-    .modal-body { padding: 18px; }
-    .modal-sub {
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--muted);
-      line-height: 1.55;
-      margin-bottom: 18px;
-    }
-    .site-cat { margin-bottom: 16px; }
-    .site-cat h4 {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 11px;
-      font-weight: 800;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      color: var(--muted);
-      margin-bottom: 9px;
-    }
-    .site-cat h4::after {
-      content: "";
-      flex: 1;
-      border-bottom: 1px dotted var(--border-soft);
-    }
-    .site-list { display: flex; flex-wrap: wrap; gap: 6px; }
-    .site-list span {
-      font-size: 12px;
-      font-weight: 700;
-      padding: 5px 10px;
-      border: 1px solid var(--border-soft);
-      color: var(--text);
-    }
-    .modal-note {
-      margin-top: 6px;
-      padding-top: 15px;
-      border-top: 1px solid var(--border-soft);
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--muted);
-      line-height: 1.6;
-    }
-    .modal-note b { color: var(--err); font-weight: 800; }
-  </style>
+[hidden] { display: none !important; }
+.locked { pointer-events: none; }
+</style>
 </head>
 <body>
-<button type="button" class="theme-toggle" id="themeToggle" aria-label="Toggle theme">&#9681; LIGHT</button>
-<div class="container">
-  <h1>WAX&nbsp;DIGGER<span class="cursor">_</span></h1>
+<div class="modal pywebview-drag-region" id="modal">
 
-  <div class="section">
-    <label>Song Link
-      <button type="button" class="info-btn" id="infoBtn" aria-label="Supported sites">i</button>
-    </label>
-    <input type="text" id="url" placeholder="Paste a track or video link" autocomplete="off" spellcheck="false">
-    <div class="field-hint" id="urlHint"></div>
+  <div class="progress" id="progress" hidden style="--p: 0">
+    <svg viewBox="0 0 600 432" preserveAspectRatio="none" aria-hidden="true">
+      <path pathLength="100"
+        d="M350 3 H536 A61 61 0 0 1 597 64 V368 A61 61 0 0 1 536 429 H64 A61 61 0 0 1 3 368 V64 A61 61 0 0 1 64 3 H350"/>
+    </svg>
+    <div class="progress__glow"></div>
   </div>
 
-  <div class="section">
-    <label>Format</label>
-    <div class="segment">
-      <input type="radio" name="fmt" id="f1" value="mp3_128">
-      <label for="f1">MP3 128k</label>
-      <input type="radio" name="fmt" id="f2" value="mp3_320" checked>
-      <label for="f2">MP3 320k</label>
-      <input type="radio" name="fmt" id="f3" value="flac">
-      <label for="f3">FLAC</label>
-      <input type="radio" name="fmt" id="f4" value="wav">
-      <label for="f4">WAV</label>
-      <input type="radio" name="fmt" id="f5" value="aac">
-      <label for="f5">AAC</label>
+  <img class="logo pywebview-drag-region" src="logo.png" width="268" height="100" alt="WAX">
+
+  <!-- ===== main screen ===== -->
+  <div class="stack" id="mainScreen">
+    <label class="input" id="urlInput" data-state="default">
+      <span class="ic24 input__icon">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path fill-rule="evenodd" clip-rule="evenodd" d="M2.27701 7.93404C1.35549 8.85538 0.720348 10.0238 0.448271 11.2981C0.176194 12.5725 0.27881 13.8984 0.743733 15.1158C1.20866 16.3331 2.01601 17.3899 3.06832 18.1584C4.12064 18.927 5.37293 19.3746 6.67401 19.447C6.87266 19.458 7.06754 19.3897 7.21579 19.257C7.36404 19.1243 7.45351 18.9382 7.46451 18.7395C7.47552 18.5409 7.40716 18.346 7.27448 18.1978C7.1418 18.0495 6.95566 17.96 6.75701 17.949C5.74516 17.8926 4.77128 17.5445 3.9529 16.9467C3.13453 16.349 2.50665 15.5272 2.14505 14.5804C1.78345 13.6337 1.70359 12.6026 1.91509 11.6115C2.1266 10.6204 2.62044 9.71167 3.33701 8.99504L6.16601 6.16604C7.15063 5.18142 8.48605 4.62827 9.87851 4.62827C11.271 4.62827 12.6064 5.18142 13.591 6.16604C14.5756 7.15066 15.1288 8.48608 15.1288 9.87854C15.1288 11.271 14.5756 12.6064 13.591 13.591L12.176 15.005C12.1044 15.0743 12.0473 15.157 12.0081 15.2486C11.9688 15.3401 11.9481 15.4385 11.9473 15.5381C11.9465 15.6377 11.9655 15.7364 12.0033 15.8286C12.041 15.9207 12.0968 16.0044 12.1672 16.0748C12.2377 16.1452 12.3214 16.2009 12.4136 16.2385C12.5058 16.2762 12.6046 16.2951 12.7042 16.2942C12.8038 16.2933 12.9022 16.2726 12.9936 16.2332C13.0851 16.1939 13.1679 16.1367 13.237 16.065L14.651 14.652C15.9169 13.3862 16.6281 11.6693 16.6281 9.87904C16.6281 8.08882 15.9169 6.37192 14.651 5.10604C13.3851 3.84016 11.6682 3.129 9.87801 3.129C8.08779 3.129 6.37089 3.84016 5.10501 5.10604L2.27701 7.93404Z" fill="currentColor"/>
+          <path opacity="0.5" d="M10.409 17.834C9.92141 17.3464 9.53465 16.7677 9.27078 16.1307C9.00691 15.4937 8.8711 14.8109 8.8711 14.1215C8.8711 13.432 9.00691 12.7492 9.27078 12.1122C9.53465 11.4753 9.92141 10.8965 10.409 10.409L11.823 8.99496C11.8967 8.9263 11.9558 8.8435 11.9968 8.7515C12.0377 8.6595 12.0598 8.56019 12.0616 8.45948C12.0633 8.35878 12.0448 8.25875 12.0071 8.16536C11.9694 8.07197 11.9132 7.98714 11.842 7.91592C11.7708 7.8447 11.686 7.78856 11.5926 7.75084C11.4992 7.71312 11.3992 7.69459 11.2985 7.69637C11.1977 7.69815 11.0984 7.72019 11.0064 7.76118C10.9144 7.80217 10.8316 7.86127 10.763 7.93496L9.34698 9.34696C8.0811 10.6128 7.36993 12.3297 7.36993 14.12C7.36993 15.9102 8.0811 17.6271 9.34698 18.893C10.6129 20.1588 12.3298 20.87 14.12 20.87C15.9102 20.87 17.6271 20.1588 18.893 18.893L21.722 16.065C22.6435 15.1436 23.2787 13.9751 23.5507 12.7006C23.8228 11.4262 23.7201 10.1002 23.255 8.88281C22.79 7.66543 21.9825 6.6087 20.93 5.84019C19.8776 5.07169 18.6251 4.62427 17.324 4.55196C17.2256 4.54651 17.1271 4.56049 17.0342 4.59309C16.9412 4.6257 16.8556 4.6763 16.7822 4.74199C16.634 4.87467 16.5445 5.06081 16.5335 5.25946C16.5225 5.45811 16.5908 5.65299 16.7235 5.80124C16.8562 5.94949 17.0423 6.03895 17.241 6.04996C18.2528 6.10642 19.2267 6.45452 20.0451 7.05227C20.8635 7.65001 21.4913 8.47183 21.8529 9.41855C22.2145 10.3653 22.2944 11.3964 22.0829 12.3875C21.8714 13.3786 21.3775 14.2873 20.661 15.004L17.832 17.833C16.8474 18.8173 15.5122 19.3703 14.12 19.3703C12.7277 19.3703 11.3925 18.8173 10.408 17.833" fill="currentColor"/>
+        </svg>
+      </span>
+      <input id="url" type="text" placeholder="paste a track link" autocomplete="off" spellcheck="false">
+      <button type="button" class="btn btn--white input__chip" id="fmtChip">MP3 128K</button>
+    </label>
+
+    <div class="row" id="folderRow" hidden>
+      <label class="input" id="folderInput">
+        <span class="ic24 input__icon">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path opacity="0.5" d="M17.9999 10H12.9999" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <path opacity="0.5" d="M9.99994 3H16.4999C16.9639 3 17.1969 3 17.3919 3.026C18.0464 3.11232 18.6542 3.41211 19.121 3.87893C19.5878 4.34574 19.8876 4.9535 19.9739 5.608C19.9999 5.803 19.9999 6.036 19.9999 6.5" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M2 6.95C2 6.067 2 5.626 2.07 5.258C2.21922 4.46784 2.60314 3.741 3.17165 3.17231C3.74017 2.60361 4.46689 2.21947 5.257 2.07C5.626 2 6.068 2 6.95 2C7.336 2 7.53 2 7.716 2.017C8.51705 2.09223 9.27679 2.40728 9.896 2.921C10.04 3.04 10.176 3.176 10.45 3.45L11 4C11.816 4.816 12.224 5.224 12.712 5.495C12.9802 5.64449 13.2648 5.7626 13.56 5.847C14.098 6 14.675 6 15.828 6H16.202C18.834 6 20.151 6 21.006 6.77C21.0853 6.84 21.16 6.91467 21.23 6.994C22 7.849 22 9.166 22 11.798V14C22 17.771 22 19.657 20.828 20.828C19.656 21.999 17.771 22 14 22H10C6.229 22 4.343 22 3.172 20.828C2.001 19.656 2 17.771 2 14V6.95Z" stroke="currentColor" stroke-width="1.5"/>
+          </svg>
+        </span>
+        <input id="folder" type="text" placeholder="output folder" autocomplete="off" spellcheck="false">
+      </label>
+      <button type="button" class="btn btn--white" id="browseBtn">browse</button>
     </div>
   </div>
 
-  <div class="section">
-    <label>Output folder</label>
-    <div class="folder-row">
-      <div class="folder-path" id="folderPath">~/Downloads</div>
-      <button class="btn-secondary" onclick="chooseFolder()">
-        <svg class="ico" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" stroke-linejoin="miter"><path d="M3 6h6l2 2h10v11H3z"/></svg>
-        Browse
+  <button type="button" class="btn btn--yellow btn--full" id="actionBtn" hidden>GRAB THE WAX</button>
+
+  <!-- ===== info screen ===== -->
+  <div class="info__text" id="infoText" hidden>
+    <p>thanks for using WAX! luv y'all &lt;3</p>
+    <p>here u can find other links for my projects:</p>
+  </div>
+  <div class="row row--info" id="infoRow" hidden>
+    <button type="button" class="btn btn--brand" style="--edge:#6880ED" data-link="github" aria-label="GitHub">
+      <span class="ic24" style="color:#6880ED">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path opacity="0.2" d="M19.5 9.75V10.5C19.5 11.6935 19.0259 12.8381 18.182 13.682C17.3381 14.5259 16.1935 15 15 15H12.75C13.5456 15 14.3087 15.3161 14.8713 15.8787C15.4339 16.4413 15.75 17.2044 15.75 18V21.75H9.75V18C9.75 17.2044 10.0661 16.4413 10.6287 15.8787C11.1913 15.3161 11.9544 15 12.75 15H10.5C9.30653 15 8.16193 14.5259 7.31802 13.682C6.47411 12.8381 6 11.6935 6 10.5V9.75C6.00724 8.83679 6.28486 7.94619 6.79781 7.19062C6.53575 6.51206 6.42912 5.78338 6.48574 5.05817C6.54236 4.33297 6.7608 3.62967 7.125 3C7.94376 2.99981 8.74937 3.20583 9.46752 3.59907C10.1857 3.9923 10.7932 4.56008 11.2341 5.25H14.2659C14.7068 4.56008 15.3143 3.9923 16.0325 3.59907C16.7506 3.20583 17.5562 2.99981 18.375 3C18.7392 3.62967 18.9576 4.33297 19.0143 5.05817C19.0709 5.78338 18.9642 6.51206 18.7022 7.19062C19.2151 7.94619 19.4928 8.83679 19.5 9.75Z" fill="currentColor"/>
+          <path d="M19.5281 7.09501C19.7577 6.35561 19.8315 5.57662 19.7449 4.80725C19.6582 4.03787 19.413 3.29482 19.0247 2.62501C18.9588 2.51097 18.8641 2.41628 18.7501 2.35045C18.636 2.28462 18.5067 2.24998 18.375 2.25001C17.5014 2.24818 16.6395 2.4507 15.8582 2.84137C15.0768 3.23205 14.3977 3.80006 13.875 4.50001H11.625C11.1023 3.80006 10.4232 3.23205 9.64182 2.84137C8.86047 2.4507 7.99857 2.24818 7.125 2.25001C6.99332 2.24998 6.86395 2.28462 6.7499 2.35045C6.63586 2.41628 6.54115 2.51097 6.47531 2.62501C6.08704 3.29484 5.84177 4.03785 5.75497 4.80719C5.66816 5.57653 5.74169 6.35551 5.97094 7.09501C5.50756 7.90381 5.25934 8.81793 5.25 9.75001V10.5C5.25158 11.769 5.71225 12.9946 6.54696 13.9504C7.38166 14.9063 8.53402 15.5278 9.79125 15.7003C9.27807 16.357 8.99952 17.1666 9 18V18.75H6.75C6.15326 18.75 5.58097 18.513 5.15901 18.091C4.73705 17.669 4.5 17.0967 4.5 16.5C4.5 16.0076 4.403 15.5199 4.21455 15.0649C4.02609 14.61 3.74987 14.1966 3.40165 13.8484C3.05343 13.5001 2.64003 13.2239 2.18506 13.0355C1.73009 12.847 1.24246 12.75 0.75 12.75C0.551088 12.75 0.360322 12.829 0.21967 12.9697C0.0790176 13.1103 0 13.3011 0 13.5C0 13.6989 0.0790176 13.8897 0.21967 14.0303C0.360322 14.171 0.551088 14.25 0.75 14.25C1.34674 14.25 1.91903 14.4871 2.34099 14.909C2.76295 15.331 3 15.9033 3 16.5C3 17.4946 3.39509 18.4484 4.09835 19.1517C4.80161 19.8549 5.75544 20.25 6.75 20.25H9V21.75C9 21.9489 9.07902 22.1397 9.21967 22.2803C9.36032 22.421 9.55109 22.5 9.75 22.5C9.94891 22.5 10.1397 22.421 10.2803 22.2803C10.421 22.1397 10.5 21.9489 10.5 21.75V18C10.5 17.4033 10.7371 16.831 11.159 16.409C11.581 15.9871 12.1533 15.75 12.75 15.75C13.3467 15.75 13.919 15.9871 14.341 16.409C14.7629 16.831 15 17.4033 15 18V21.75C15 21.9489 15.079 22.1397 15.2197 22.2803C15.3603 22.421 15.5511 22.5 15.75 22.5C15.9489 22.5 16.1397 22.421 16.2803 22.2803C16.421 22.1397 16.5 21.9489 16.5 21.75V18C16.5005 17.1666 16.2219 16.357 15.7087 15.7003C16.966 15.5278 18.1183 14.9063 18.953 13.9504C19.7877 12.9946 20.2484 11.769 20.25 10.5V9.75001C20.241 8.81776 19.9924 7.90349 19.5281 7.09501ZM18.75 10.5C18.75 11.4946 18.3549 12.4484 17.6517 13.1517C16.9484 13.8549 15.9946 14.25 15 14.25H10.5C9.50544 14.25 8.55161 13.8549 7.84835 13.1517C7.14509 12.4484 6.75 11.4946 6.75 10.5V9.75001C6.7592 9.00004 6.98373 8.2685 7.39688 7.64251C7.47389 7.541 7.52377 7.42154 7.54182 7.2954C7.55986 7.16926 7.54547 7.04061 7.5 6.92157C7.3046 6.41777 7.21055 5.88035 7.22326 5.34013C7.23597 4.79991 7.35518 4.26751 7.57406 3.77345C8.18786 3.83948 8.77892 4.04281 9.30344 4.36836C9.82796 4.69391 10.2725 5.13334 10.6041 5.65407C10.6716 5.75974 10.7646 5.84676 10.8745 5.9072C10.9844 5.96763 11.1077 5.99955 11.2331 6.00001H14.2659C14.3918 6.00002 14.5157 5.96833 14.6261 5.90787C14.7366 5.84742 14.83 5.76014 14.8978 5.65407C15.2293 5.1333 15.6738 4.69383 16.1984 4.36827C16.7229 4.04271 17.314 3.83941 17.9278 3.77345C18.1464 4.26763 18.2653 4.8001 18.2777 5.34032C18.2901 5.88054 18.1957 6.41789 18 6.92157C17.9547 7.03947 17.9395 7.16682 17.9559 7.29206C17.9722 7.41731 18.0196 7.53648 18.0938 7.63876C18.5108 8.26485 18.7386 8.99783 18.75 9.75001V10.5Z" fill="currentColor"/>
+        </svg>
+      </span>
+    </button>
+    <button type="button" class="btn btn--brand" style="--edge:#6A6A6A" data-link="x" aria-label="X">
+      <span class="ic24" style="color:#fff">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path opacity="0.5" d="M3 21L10.548 13.452M10.548 13.452L3 3H8L13.452 10.548M10.548 13.452L16 21H21L13.452 10.548M21 3L17.226 6.774L13.452 10.548" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M8 3L13.452 10.548L21 21H16L10.548 13.452L3 3H8Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </span>
+    </button>
+    <button type="button" class="btn btn--brand" style="--edge:#83C3FF" data-link="telegram" aria-label="Telegram">
+      <span class="ic24" style="color:#83C3FF">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path d="M17.498 18.485L20.628 9.09399C21.876 5.34899 22.501 3.47599 21.512 2.48799C20.524 1.49899 18.652 2.12399 14.906 3.37199L5.57501 6.48199C3.49301 7.17599 2.45201 7.52299 2.13601 8.28599C2.06134 8.46665 2.01701 8.65465 2.00301 8.84999C1.94401 9.67399 2.72001 10.45 4.27201 12.001L4.55501 12.284C4.80901 12.538 4.93701 12.666 5.03301 12.807C5.22301 13.087 5.33001 13.414 5.34301 13.752C5.35101 13.923 5.32401 14.102 5.27101 14.457C5.07501 15.761 4.97701 16.413 5.09201 16.915C5.32201 17.915 6.09601 18.7 7.09201 18.943C7.59201 19.066 8.24601 18.977 9.55201 18.8L9.62401 18.79C9.99201 18.74 10.176 18.715 10.353 18.726C10.673 18.745 10.983 18.85 11.251 19.029C11.398 19.127 11.53 19.259 11.792 19.521L12.044 19.773C13.554 21.283 14.309 22.038 15.11 21.999C15.33 21.988 15.548 21.937 15.75 21.847C16.484 21.524 16.823 20.511 17.498 18.485Z" stroke="currentColor" stroke-width="1.5"/>
+          <path opacity="0.5" d="M6 18L21 2.99997" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </span>
+    </button>
+    <button type="button" class="btn btn--brand" style="--edge:#55BF70" data-link="donate" aria-label="Donate">
+      <span class="ic24" style="color:#71EF91">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path d="M9 19C6.191 19 4.787 19 3.778 18.326C3.34106 18.0341 2.96591 17.6589 2.674 17.222C2 16.213 2 14.81 2 12C2 9.19 2 7.787 2.674 6.778C2.96591 6.34106 3.34106 5.96591 3.778 5.674C4.787 5 6.19 5 9 5H15C17.809 5 19.213 5 20.222 5.674C20.6589 5.96591 21.0341 6.34106 21.326 6.778C22 7.787 22 9.19 22 12C22 14.81 22 16.213 21.326 17.222C21.0341 17.6589 20.6589 18.0341 20.222 18.326C19.213 19 17.81 19 15 19H9Z" stroke="currentColor" stroke-width="1.5"/>
+          <path opacity="0.5" d="M9 9C8.20435 9 7.44129 9.31607 6.87868 9.87868C6.31607 10.4413 6 11.2044 6 12C6 12.7956 6.31607 13.5587 6.87868 14.1213C7.44129 14.6839 8.20435 15 9 15M15 9C15.7956 9 16.5587 9.31607 17.1213 9.87868C17.6839 10.4413 18 11.2044 18 12C18 12.7956 17.6839 13.5587 17.1213 14.1213C16.5587 14.6839 15.7956 15 15 15" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M9 5V18.5M15 5V18.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </span>
+    </button>
+  </div>
+  <div class="info__made" id="infoMade" hidden>made by jeneverbes</div>
+
+  <div class="wintools pywebview-drag-region" id="winTools" hidden>
+    <div class="wintools__bar" id="winBar">
+      <button type="button" class="wintools__btn wintools__btn--close" id="winClose" aria-label="close">
+        <span class="wintools__dot"><svg viewBox="0 0 12 12" fill="none"><path d="M4.2 4.2 7.8 7.8M7.8 4.2 4.2 7.8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span>
+        <span class="ic24 wintools__ic"><svg viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
+      </button>
+      <button type="button" class="wintools__btn wintools__btn--min" id="winMin" aria-label="minimize">
+        <span class="wintools__dot"><svg viewBox="0 0 12 12" fill="none"><path d="M3.4 6h5.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span>
+        <span class="ic24 wintools__ic"><svg viewBox="0 0 24 24" fill="none"><path d="M5 12h14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
       </button>
     </div>
   </div>
 
-  <div class="section">
-    <button class="btn-primary" id="dlBtn" onclick="startDownload()">Download</button>
-  </div>
-
-  <div class="section" id="progressSection" style="display:none">
-    <label>Progress</label>
-    <div class="progress-row">
-      <div class="progress-track">
-        <div class="progress-fill" id="progressFill"></div>
-        <span class="progress-num progress-num-base" id="progressPctBase">0%</span>
-        <span class="progress-num progress-num-over" id="progressPctOver">0%</span>
-      </div>
-    </div>
-    <div class="progress-state" id="progressState">Queued</div>
-
-    <button type="button" class="log-toggle" id="logToggle" aria-expanded="false">
-      <span class="tri">&#9656;</span> Output Log
-    </button>
-    <div class="log-wrap" id="logWrap" hidden>
-      <div class="log-box" id="logBox"></div>
-      <div class="log-actions">
-        <button type="button" class="log-copy" id="logCopy">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" stroke-linejoin="miter"><rect x="9" y="9" width="11" height="11"/><path d="M5 15H4V4h11v1"/></svg>
-          <span id="logCopyLabel">Copy</span>
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <div class="section">
-    <label>History</label>
-    <ul class="history-list" id="historyList">
-      <li class="empty-history">No downloads yet</li>
-    </ul>
-  </div>
-</div>
-
-<div class="modal-overlay" id="sitesModal">
-  <div class="modal" role="dialog" aria-modal="true" aria-label="Supported sites">
-    <div class="modal-head">
-      <span>Supported Sites</span>
-      <button type="button" class="modal-close" id="modalClose" aria-label="Close">&times;</button>
-    </div>
-    <div class="modal-body">
-      <p class="modal-sub">yt-dlp can extract audio from <b>1700+ sites</b>. The most common ones:</p>
-
-      <div class="site-cat">
-        <h4>Music</h4>
-        <div class="site-list">
-          <span>SoundCloud</span><span>Bandcamp</span><span>Mixcloud</span>
-          <span>Audiomack</span><span>Audius</span><span>YouTube&nbsp;Music</span>
-        </div>
-      </div>
-
-      <div class="site-cat">
-        <h4>Video</h4>
-        <div class="site-list">
-          <span>YouTube</span><span>Vimeo</span><span>Dailymotion</span>
-          <span>Bilibili</span><span>Niconico</span>
-        </div>
-      </div>
-
-      <div class="site-cat">
-        <h4>Social</h4>
-        <div class="site-list">
-          <span>TikTok</span><span>Instagram</span><span>Facebook</span>
-          <span>X&nbsp;/&nbsp;Twitter</span><span>Reddit</span><span>VK</span>
-        </div>
-      </div>
-
-      <div class="site-cat">
-        <h4>Live</h4>
-        <div class="site-list">
-          <span>Twitch</span>
-        </div>
-      </div>
-
-      <p class="modal-note">
-        <b>Not supported:</b> Spotify, Apple Music, Deezer, Tidal, Amazon Music, Pandora, Qobuz —
-        DRM-protected streaming, can't be downloaded.
-      </p>
-    </div>
-  </div>
+  <button type="button" class="modal__corner" id="cornerBtn" aria-label="info">
+    <span class="ic24" id="cornerIcon">
+      <svg viewBox="0 0 24 24" fill="none">
+        <path opacity="0.5" d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" stroke="currentColor" stroke-width="1.5"/>
+        <path d="M12 17V11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        <path d="M12 7C12.5523 7 13 7.44772 13 8C13 8.55228 12.5523 9 12 9C11.4477 9 11 8.55228 11 8C11 7.44772 11.4477 7 12 7Z" fill="currentColor"/>
+      </svg>
+    </span>
+  </button>
 </div>
 
 <script>
-  let currentFolder = "";
-  let downloading = false;
-  let urlInvalid = false;
+// links for the info screen — user will supply them; empty = click is a no-op
+const LINKS = { github: "", x: "", telegram: "", donate: "" };
 
-  async function loadFolder() {
-    const r = await fetch("/get-folder");
-    const d = await r.json();
-    currentFolder = d.path;
-    document.getElementById("folderPath").textContent = d.path;
-  }
+const ICON_INFO = document.getElementById("cornerIcon").innerHTML;
+const ICON_CLOSE = `<svg viewBox="0 0 24 24" fill="none">
+  <path opacity="0.5" d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" stroke="currentColor" stroke-width="1.5"/>
+  <path d="M14.5 9.5L9.5 14.5M9.5 9.5L14.5 14.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+</svg>`;
 
-  async function chooseFolder() {
-    const r = await fetch("/choose-folder", { method: "POST" });
-    const d = await r.json();
-    if (d.path) {
-      currentFolder = d.path;
-      document.getElementById("folderPath").textContent = d.path;
-    }
-  }
+const FORMATS = [
+  ["mp3_128", "MP3 128K"],
+  ["mp3_320", "MP3 320K"],
+  ["flac", "FLAC"],
+  ["wav", "WAV"],
+  ["aac", "AAC"],
+];
 
-  function setProgress(pct, state, cls) {
-    const fill = document.getElementById("progressFill");
-    const w = (cls === "done" || cls === "error") ? 100 : Math.max(0, Math.min(100, pct));
-    fill.style.width = w + "%";
-    fill.classList.toggle("done", cls === "done");
-    fill.classList.toggle("error", cls === "error");
+const el = (id) => document.getElementById(id);
+const urlEl = el("url"), folderEl = el("folder"), actionBtn = el("actionBtn");
+const progressEl = el("progress"), urlInput = el("urlInput");
 
-    const num = cls === "error" ? "ERROR" : Math.round(cls === "done" ? 100 : pct) + "%";
-    document.getElementById("progressPctBase").textContent = num;
-    const over = document.getElementById("progressPctOver");
-    over.textContent = num;
-    over.style.clipPath = "inset(0 " + (100 - w) + "% 0 0)";
+let fmtIndex = 0;
+let phase = "idle";      // idle | busy | done | error
+let info = false;
+let urlInvalid = false;
+let lastHeight = 0;
+let doneTimer = 0;
 
-    const st = document.getElementById("progressState");
-    st.textContent = state;
-    st.className = "progress-state" + (cls ? " " + cls : "");
-  }
+// Returns the bridge call's promise, or null when running in a plain browser.
+function api(name, ...args) {
+  const a = window.pywebview && window.pywebview.api;
+  return a && a[name] ? a[name](...args) : null;
+}
 
-  function openLog() {
-    const wrap = document.getElementById("logWrap");
-    if (wrap.hidden) {
-      wrap.hidden = false;
-      const t = document.getElementById("logToggle");
-      t.classList.add("open");
-      t.setAttribute("aria-expanded", "true");
-    }
-  }
+function resize(h) {
+  if (h === lastHeight) return;
+  if (api("resize", h)) lastHeight = h;  // no bridge yet — retry on the next render
+}
 
-  function appendLog(text, cls) {
-    const box = document.getElementById("logBox");
-    const div = document.createElement("div");
-    div.className = "log-line" + (cls ? " " + cls : "");
-    div.textContent = text;
-    box.appendChild(div);
-    box.scrollTop = box.scrollHeight;
-  }
+// A link is anything that parses as http(s) with a real domain. Whether yt-dlp
+// actually supports the site can only be answered by running it.
+function isLikelyUrl(value) {
+  const v = value.trim();
+  if (!v) return false;
+  try {
+    const u = new URL(/^[a-z]+:\/\//i.test(v) ? v : "https://" + v);
+    if (!/^https?:$/.test(u.protocol)) return false;
+    return /^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/i.test(u.hostname);
+  } catch (e) { return false; }
+}
 
-  async function startDownload() {
-    const url = document.getElementById("url").value.trim();
-    if (!url) { document.getElementById("url").focus(); return; }
-    if (urlInvalid) { document.getElementById("url").focus(); return; }
+function render() {
+  const hasUrl = isLikelyUrl(urlEl.value);
+  const hasFolder = !!folderEl.value.trim();
 
-    const fmt = document.querySelector('input[name="fmt"]:checked').value;
-    const btn = document.getElementById("dlBtn");
+  el("mainScreen").hidden = info;
+  el("folderRow").hidden = info || !hasUrl;
+  actionBtn.hidden = info || !hasUrl || !hasFolder;
+  el("infoText").hidden = !info;
+  el("infoRow").hidden = !info;
+  el("infoMade").hidden = !info;
 
-    downloading = true;
-    btn.disabled = true;
-    document.getElementById("progressSection").style.display = "block";
-    document.getElementById("logBox").innerHTML = "";
-    setProgress(0, "Queued", "");
+  el("cornerIcon").innerHTML = info ? ICON_CLOSE : ICON_INFO;
+  el("cornerBtn").classList.toggle("modal__corner--close", info);
+  el("cornerBtn").setAttribute("aria-label", info ? "close" : "info");
 
+  urlInput.dataset.state = urlInvalid ? "error" : "default";
+  el("mainScreen").classList.toggle("locked", phase === "busy");
+  // pointer-events alone still leaves the focused field typeable
+  urlEl.readOnly = folderEl.readOnly = phase === "busy";
+
+  actionBtn.className = "btn btn--full " +
+    (phase === "error" ? "btn--red" : phase === "busy" || phase === "done" ? "btn--white" : "btn--yellow");
+  actionBtn.textContent =
+    phase === "error" ? "ERROR" : (phase === "busy" || phase === "done") ? "WAIT" : "GRAB THE WAX";
+  actionBtn.disabled = phase === "busy" || phase === "done" || urlInvalid;
+
+  progressEl.hidden = info || phase === "idle";
+
+  resize(info ? 396 : !hasUrl ? 260 : !hasFolder ? 336 : 432);
+}
+
+function setProgress(pct) {
+  progressEl.style.setProperty("--p", Math.max(0, Math.min(100, pct)));
+}
+
+// ===== format chip =====
+el("fmtChip").addEventListener("click", () => {
+  fmtIndex = (fmtIndex + 1) % FORMATS.length;
+  el("fmtChip").textContent = FORMATS[fmtIndex][1];
+});
+
+// ===== folder =====
+async function loadFolder() {
+  try {
+    const d = await (await fetch("/get-folder")).json();
+    folderEl.value = d.path || "";
+  } catch (e) {}
+  render();
+}
+
+el("browseBtn").addEventListener("click", async () => {
+  const d = await (await fetch("/choose-folder", { method: "POST" })).json();
+  if (d.path) folderEl.value = d.path;
+  render();
+});
+
+// ===== download =====
+async function startDownload() {
+  phase = "busy";
+  progressEl.dataset.state = "";
+  setProgress(0);
+  render();
+
+  let stream_id, error;
+  try {
     const r = await fetch("/download", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url, format: fmt, output_path: currentFolder }),
+      body: JSON.stringify({
+        url: urlEl.value.trim(),
+        format: FORMATS[fmtIndex][0],
+        output_path: folderEl.value.trim(),
+      }),
     });
+    ({ stream_id, error } = await r.json());
+  } catch (e) { error = String(e); }
 
-    const { stream_id, error } = await r.json();
-    if (error) {
-      setProgress(0, "Error: " + error, "error");
-      appendLog("ERROR: " + error, "error");
-      openLog();
-      downloading = false;
-      btn.disabled = false;
-      return;
-    }
+  if (error || !stream_id) { fail(error); return; }
 
-    let pct = 0;
-    const es = new EventSource("/progress/" + stream_id);
-    es.onmessage = (e) => {
-      if (e.data === "__DONE__") {
-        es.close();
-        downloading = false;
-        btn.disabled = false;
-        const st = document.getElementById("progressState");
-        if (st.classList.contains("error")) { loadHistory(); return; }
-        setProgress(100, "Done", "done");
-        appendLog("✓ Done", "done");
-        loadHistory();
-        return;
-      }
-      const data = e.data;
-      if (!data.trim()) return;
-      appendLog(data, /^ERROR/i.test(data) ? "error" : "");
-      const m = data.match(/\[download\]\s+([\d.]+)%/);
-      if (m) { pct = parseFloat(m[1]); setProgress(pct, "Downloading", ""); return; }
-      if (/\[ExtractAudio\]|Extracting audio|\[ffmpeg\]|Merger|Post-process/i.test(data)) {
-        setProgress(pct, "Converting", ""); return;
-      }
-      if (/^ERROR/i.test(data)) { setProgress(pct, "Error — check the source", "error"); openLog(); return; }
-    };
-    es.onerror = () => {
+  let pct = 0;
+  const es = new EventSource("/progress/" + stream_id);
+  es.onmessage = (e) => {
+    const data = e.data;
+    if (data.startsWith("__DONE__:")) {
       es.close();
-      downloading = false;
-      btn.disabled = false;
-      loadHistory();
-    };
-  }
-
-  async function loadHistory() {
-    const r = await fetch("/history");
-    const items = await r.json();
-    const list = document.getElementById("historyList");
-    if (!items.length) {
-      list.innerHTML = '<li class="empty-history">No downloads yet</li>';
+      data.endsWith(":done") ? succeed() : fail(data);
       return;
     }
-    list.innerHTML = items.map(item => `
-      <li class="history-item">
-        <span class="hist-name">${item.filename || item.url}</span>
-        <span class="hist-fmt">${item.format.replace("_", " ")}</span>
-        <span class="hist-status ${item.status}">${statusLabel(item.status)}</span>
-      </li>
-    `).join("");
-  }
+    if (!data.trim()) return;
+    // several updates can arrive glued together; the last one is the current %
+    const m = [...data.matchAll(/\[download\]\s+([\d.]+)%/g)].at(-1);
+    if (m) { pct = Math.max(pct, parseFloat(m[1])); setProgress(pct); return; }
+    if (/^ERROR/i.test(data)) { es.close(); fail(data); }
+  };
+  es.onerror = () => { es.close(); if (phase === "busy") fail("stream closed"); };
+}
 
-  function statusLabel(s) {
-    return s === "done" ? "✓" : s === "error" ? "✗" : "…";
-  }
+function succeed() {
+  phase = "done";
+  setProgress(100);
+  progressEl.dataset.state = "done";
+  render();
+  doneTimer = setTimeout(reset, 2000);
+}
 
-  // ===== Theme toggle (visual only) =====
-  const __themeBtn = document.getElementById("themeToggle");
-  function applyTheme(t) {
-    document.documentElement.setAttribute("data-theme", t);
-    __themeBtn.innerHTML = t === "dark" ? "&#9681; DARK" : "&#9681; LIGHT";
-    try { localStorage.setItem("ytdlp-theme", t); } catch (e) {}
-  }
-  applyTheme((() => { try { return localStorage.getItem("ytdlp-theme"); } catch (e) { return null; } })() || "light");
-  __themeBtn.addEventListener("click", () => {
-    const cur = document.documentElement.getAttribute("data-theme");
-    applyTheme(cur === "dark" ? "light" : "dark");
-  });
+function reset() {
+  clearTimeout(doneTimer);
+  phase = "idle";
+  progressEl.dataset.state = "";
+  setProgress(0);
+  render();
+}
 
-  // ===== Output log (collapse + copy) =====
-  const logToggle = document.getElementById("logToggle");
-  logToggle.addEventListener("click", () => {
-    const wrap = document.getElementById("logWrap");
-    const open = wrap.hidden;
-    wrap.hidden = !open;
-    logToggle.classList.toggle("open", open);
-    logToggle.setAttribute("aria-expanded", String(open));
-  });
+function fail(reason) {
+  if (reason) console.error("[wax]", reason);
+  phase = "error";
+  progressEl.dataset.state = "error";
+  render();
+}
 
-  document.getElementById("logCopy").addEventListener("click", async () => {
-    const text = document.getElementById("logBox").innerText.trim();
-    if (!text) return;
-    const label = document.getElementById("logCopyLabel");
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch (e) {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.select();
-      try { document.execCommand("copy"); } catch (err) {}
-      ta.remove();
-    }
-    label.textContent = "Copied";
-    setTimeout(() => { label.textContent = "Copy"; }, 1200);
-  });
+actionBtn.addEventListener("click", () => {
+  if (phase === "error") { reset(); return; }
+  if (phase === "idle" && !urlInvalid && isLikelyUrl(urlEl.value) && folderEl.value.trim()) startDownload();
+});
 
-  // ===== Supported-sites modal =====
-  const sitesModal = document.getElementById("sitesModal");
-  document.getElementById("infoBtn").addEventListener("click", () => sitesModal.classList.add("open"));
-  document.getElementById("modalClose").addEventListener("click", () => sitesModal.classList.remove("open"));
-  sitesModal.addEventListener("click", (e) => { if (e.target === sitesModal) sitesModal.classList.remove("open"); });
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") sitesModal.classList.remove("open"); });
+// ===== info screen =====
+el("cornerBtn").addEventListener("click", () => { info = !info; render(); });
 
-  // ===== URL validation (block DRM-only services) =====
-  // yt-dlp has no extractor for these — they are DRM-protected streaming.
-  const UNSUPPORTED = [
-    [/(^|\.)spotify\.com$/,        "Spotify"],
-    [/(^|\.)music\.apple\.com$/,   "Apple Music"],
-    [/(^|\.)itunes\.apple\.com$/,  "Apple Music"],
-    [/(^|\.)deezer\.com$/,         "Deezer"],
-    [/(^|\.)tidal\.com$/,          "Tidal"],
-    [/music\.amazon\./,            "Amazon Music"],
-    [/(^|\.)pandora\.com$/,        "Pandora"],
-    [/(^|\.)qobuz\.com$/,          "Qobuz"],
-    [/(^|\.)napster\.com$/,        "Napster"],
-    [/(^|\.)audible\.com$/,        "Audible"],
-    [/(^|\.)shazam\.com$/,         "Shazam"],
-  ];
+el("infoRow").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-link]");
+  if (!btn) return;
+  const href = LINKS[btn.dataset.link];
+  if (!href) return;
+  if (!api("open_url", href)) window.open(href, "_blank");
+});
 
-  function hostOf(value) {
-    try {
-      const u = /^[a-z]+:\/\//i.test(value) ? value : "https://" + value;
-      return new URL(u).hostname.replace(/^www\./, "").toLowerCase();
-    } catch (e) { return null; }
-  }
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (info) { info = false; render(); return; }
+  api("quit");
+});
 
-  function validateUrl() {
-    const input = document.getElementById("url");
-    const hint = document.getElementById("urlHint");
-    const value = input.value.trim();
-    let msg = "";
+// ===== URL validation (DRM-only services have no yt-dlp extractor) =====
+const UNSUPPORTED = [
+  /(^|\.)spotify\.com$/, /(^|\.)music\.apple\.com$/, /(^|\.)itunes\.apple\.com$/,
+  /(^|\.)deezer\.com$/, /(^|\.)tidal\.com$/, /music\.amazon\./, /(^|\.)pandora\.com$/,
+  /(^|\.)qobuz\.com$/, /(^|\.)napster\.com$/, /(^|\.)audible\.com$/, /(^|\.)shazam\.com$/,
+];
 
-    if (value) {
-      const host = hostOf(value);
-      for (const [re, name] of UNSUPPORTED) {
-        if (host && re.test(host)) { msg = name + " is DRM-protected — can't download from it"; break; }
-      }
-    }
+function hostOf(value) {
+  try {
+    const u = /^[a-z]+:\/\//i.test(value) ? value : "https://" + value;
+    return new URL(u).hostname.replace(/^www\./, "").toLowerCase();
+  } catch (e) { return null; }
+}
 
-    urlInvalid = !!msg;
-    input.classList.toggle("invalid", urlInvalid);
-    hint.textContent = msg;
-    hint.classList.toggle("show", urlInvalid);
-    if (!downloading) document.getElementById("dlBtn").disabled = urlInvalid;
-  }
+function validate() {
+  const host = hostOf(urlEl.value.trim());
+  urlInvalid = !!host && UNSUPPORTED.some((re) => re.test(host));
+}
 
-  document.getElementById("url").addEventListener("input", validateUrl);
+function edited() {
+  if (phase === "error" || phase === "done") reset();
+}
 
-  loadFolder();
-  loadHistory();
+urlEl.addEventListener("input", () => { edited(); validate(); render(); });
+folderEl.addEventListener("input", () => { edited(); render(); });
+urlEl.addEventListener("keydown", (e) => { if (e.key === "Enter" && !actionBtn.disabled && !actionBtn.hidden) actionBtn.click(); });
+
+// ===== window controls: hover near the top edge reveals close/minimize =====
+const winTools = el("winTools"), winBar = el("winBar");
+let toolsTimer = 0;
+
+function showTools() {
+  clearTimeout(toolsTimer);
+  winBar.classList.add("is-visible");
+  el("modal").dataset.tools = "on";
+}
+
+function hideTools() {
+  clearTimeout(toolsTimer);  // a short grace period so it does not blink
+  toolsTimer = setTimeout(() => {
+    winBar.classList.remove("is-visible");
+    el("modal").dataset.tools = "";
+  }, 300);
+}
+
+winTools.addEventListener("mouseenter", showTools);
+winTools.addEventListener("mouseleave", hideTools);
+el("winClose").addEventListener("click", () => api("quit"));
+el("winMin").addEventListener("click", () => api("minimize"));
+
+// The look follows the OS, asked from the bridge — a browser dev session has
+// none, and there the strip stays hidden (the tab has its own controls).
+async function initTools() {
+  try {
+    const os = await api("platform");
+    winTools.dataset.os = os === "darwin" ? "mac" : "win";
+    winTools.hidden = false;
+  } catch (e) {}
+  render();
+}
+
+window.addEventListener("pywebviewready", initTools);
+if (window.pywebview) initTools();  // in case the bridge landed before this ran
+
+loadFolder();
+urlEl.focus();
 </script>
 </body>
 </html>

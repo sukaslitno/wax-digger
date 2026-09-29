@@ -7,14 +7,20 @@ import subprocess
 import sys
 import tempfile
 import threading
-import webbrowser
+import time
 
-from flask import Flask, Response, jsonify, render_template, request
+import webview
+from flask import Flask, Response, jsonify, render_template, request, send_from_directory
 
 HOST = "127.0.0.1"
 PORT = 7337
 URL = f"http://{HOST}:{PORT}"
 IS_WINDOWS = os.name == "nt"
+
+# The UI is a fixed 600px-wide modal; height follows the screen it shows
+# (260 empty / 336 folder / 396 info / 432 filled) via Api.resize().
+WINDOW_WIDTH = 600
+WINDOW_HEIGHT = 260
 
 
 # ---------------------------------------------------------------------------
@@ -76,15 +82,16 @@ def find_ffmpeg_location():
 YTDLP_CMD = find_ytdlp()
 FFMPEG_LOCATION = find_ffmpeg_location()
 
-CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".ytdlpgui_config.json")
+CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".wax-digger_config.json")
 DEFAULT_FOLDER = os.path.join(os.path.expanduser("~"), "Downloads")
-TEMP_DIR = os.path.join(tempfile.gettempdir(), "ytdlp-gui-temp")
+TEMP_DIR = os.path.join(tempfile.gettempdir(), "wax-digger-temp")
 
 app = Flask(__name__, template_folder=os.path.join(RES, "templates"))
 
 download_queue = queue.Queue()
 history = []
 active_streams = {}
+active_procs = set()
 
 FORMATS = {
     "mp3_128": ["-x", "--audio-format", "mp3", "--audio-quality", "5"],
@@ -112,8 +119,12 @@ def pick_folder():
     """Open a native folder picker for the current OS. Returns a path or ""."""
     try:
         if sys.platform == "darwin":
-            script = 'tell application "Finder" to set f to choose folder\nPOSIX path of f'
-            r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+            r = subprocess.run(
+                ["osascript",
+                 "-e", 'tell application "Finder" to activate',
+                 "-e", 'POSIX path of (choose folder with prompt "Select output folder:")'],
+                capture_output=True, text=True,
+            )
             return r.stdout.strip()
         if IS_WINDOWS:
             ps = (
@@ -158,6 +169,16 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/logo.png")
+def logo():
+    return send_from_directory(os.path.join(RES, "templates"), "logo.png")
+
+
+@app.route("/dm-mono.woff2")
+def font():
+    return send_from_directory(os.path.join(RES, "templates"), "dm-mono.woff2")
+
+
 @app.route("/status")
 def status():
     cfg = load_config()
@@ -187,6 +208,7 @@ def download():
     url = data.get("url", "").strip()
     fmt = data.get("format", "mp3_320")
     output_path = data.get("output_path") or load_config().get("output_path", DEFAULT_FOLDER)
+    output_path = os.path.expanduser(output_path)
 
     if not url:
         return jsonify({"error": "URL is required"}), 400
@@ -194,7 +216,10 @@ def download():
     fmt_args = FORMATS.get(fmt, FORMATS["mp3_320"])
     os.makedirs(TEMP_DIR, exist_ok=True)
     cmd = YTDLP_CMD + fmt_args + [
-        "-k",
+        # one download pass (no separate video+audio + merge), one progress ramp
+        "-f", "bestaudio/best",
+        "--newline",      # progress updates as lines, not \r-glued into one blob
+        "--no-playlist",  # a track link with ?list= context is still one track
         "-o", "%(title)s.%(ext)s",
         "-P", output_path,
         "-P", f"temp:{TEMP_DIR}",
@@ -212,6 +237,7 @@ def download():
         history.pop()
 
     def run():
+        proc = None
         try:
             kwargs = {}
             if IS_WINDOWS:
@@ -225,6 +251,7 @@ def download():
                 bufsize=1,
                 **kwargs,
             )
+            active_procs.add(proc)
             for line in proc.stdout:
                 line = line.rstrip()
                 q.put(line)
@@ -244,6 +271,7 @@ def download():
             entry["status"] = status
             q.put(f"ERROR: {e}")
         finally:
+            active_procs.discard(proc)
             q.put(f"__DONE__:{status}")
 
     threading.Thread(target=run, daemon=True).start()
@@ -257,17 +285,19 @@ def progress(stream_id):
         return Response("data: Stream not found\n\n", mimetype="text/event-stream")
 
     def generate():
-        while True:
-            try:
-                line = q.get(timeout=30)
-            except queue.Empty:
-                yield "data: \n\n"
-                continue
-            if line is not None and line.startswith("__DONE__:"):
+        # GeneratorExit (client gone) must clean up too, or entries pile up.
+        try:
+            while True:
+                try:
+                    line = q.get(timeout=30)
+                except queue.Empty:
+                    yield "data: \n\n"
+                    continue
                 yield f"data: {line}\n\n"
-                active_streams.pop(stream_id, None)
-                break
-            yield f"data: {line}\n\n"
+                if line is not None and line.startswith("__DONE__:"):
+                    break
+        finally:
+            active_streams.pop(stream_id, None)
 
     return Response(generate(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
@@ -284,13 +314,119 @@ def _port_in_use():
         return s.connect_ex((HOST, PORT)) == 0
 
 
-def main():
-    # If an instance is already running, just surface its window and exit.
-    if _port_in_use():
-        webbrowser.open(URL)
+class Api:
+    """Bridge exposed to the UI as window.pywebview.api."""
+
+    def __init__(self):
+        self.window = None
+
+    def resize(self, height):
+        # The window is a fixed-width 600px modal; only its height follows the screen.
+        if self.window:
+            self.window.resize(WINDOW_WIDTH, int(height))
+
+    def open_url(self, url):
+        if url.startswith(("http://", "https://")):
+            _open_external(url)
+
+    def platform(self):
+        """'darwin' | 'win32' | 'linux' — the UI draws its window controls to match."""
+        return sys.platform
+
+    def minimize(self):
+        if self.window:
+            self.window.minimize()
+
+    def quit(self):
+        for p in list(active_procs):
+            try:
+                p.terminate()
+            except Exception:
+                pass
+        if self.window:
+            # destroy() straight from a js_api call hangs the app: pywebview's
+            # bridge thread then waits forever for a return value the stopped
+            # event loop can no longer deliver, and it is not a daemon thread.
+            threading.Timer(0.1, self.window.destroy).start()
+
+
+def _open_external(url):
+    """Open a link in the user's real browser, never inside the modal."""
+    try:
+        if sys.platform == "darwin":
+            subprocess.Popen(["/usr/bin/open", url])
+        elif IS_WINDOWS:
+            os.startfile(url)  # type: ignore[attr-defined]
+        else:
+            subprocess.Popen(["xdg-open", url])
+    except Exception:
+        pass
+
+
+def _wait_for_server():
+    for _ in range(50):  # up to ~10s
+        if _port_in_use():
+            return True
+        time.sleep(0.2)
+    return False
+
+
+def _icon_path():
+    """The app icon file, in the bundle or in the source checkout."""
+    for p in (
+        os.path.join(RES, "app_icon.png"),
+        os.path.join(os.path.dirname(RES), "packaging", "app_icon.png"),
+        os.path.join(os.path.dirname(RES), "packaging", "icon_source.png"),
+    ):
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def _set_dock_icon():
+    """Without this macOS shows a generic Python rocket while the app runs."""
+    path = _icon_path()
+    if sys.platform != "darwin" or not path:
         return
-    threading.Timer(1.2, lambda: webbrowser.open(URL)).start()
-    app.run(host=HOST, port=PORT, debug=False)
+    try:
+        from AppKit import NSApplication, NSImage
+
+        image = NSImage.alloc().initWithContentsOfFile_(path)
+        if image:
+            NSApplication.sharedApplication().setApplicationIconImage_(image)
+    except Exception:
+        pass
+
+
+def main():
+    # A second launch does not start another server — it just shows a window on
+    # the one that is already running.
+    if not _port_in_use():
+        threading.Thread(
+            target=lambda: app.run(host=HOST, port=PORT, debug=False), daemon=True
+        ).start()
+        _wait_for_server()
+
+    # easy_drag would move the window on *any* mouse drag, so text could never be
+    # selected in the url/folder fields. Instead only the modal backdrop itself
+    # (.pywebview-drag-region, direct target only) drags the window.
+    webview.settings["DRAG_REGION_DIRECT_TARGET_ONLY"] = True
+    _set_dock_icon()
+
+    api = Api()
+    api.window = webview.create_window(
+        "WAX",
+        URL,
+        width=WINDOW_WIDTH,
+        height=WINDOW_HEIGHT,
+        frameless=True,
+        easy_drag=False,
+        resizable=False,
+        transparent=sys.platform == "darwin",  # Windows falls back to square black
+        background_color="#000000",
+        js_api=api,
+    )
+    webview.start()
 
 
 if __name__ == "__main__":
