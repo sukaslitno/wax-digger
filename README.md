@@ -3,9 +3,10 @@
 A tiny local audio downloader built on **yt-dlp**, with a matching browser
 extension. Two pieces:
 
-- **`ytdlp-gui/`** — a local Flask server + web UI (`127.0.0.1:7337`). Shipped as
-  a self-contained desktop app: **`WaxDigger.dmg`** (macOS) and
-  **`WaxDigger.exe`** (Windows portable), each bundling `yt-dlp` + `ffmpeg`.
+- **`ytdlp-gui/`** — a local Flask server (`127.0.0.1:7337`) shown in a native
+  frameless window (pywebview), not a browser tab. Shipped as a self-contained
+  desktop app: **`WaxDigger.dmg`** (macOS) and **`WaxDigger.exe`** (Windows
+  portable), each bundling `yt-dlp` + `ffmpeg`.
 - **`ytdlp-extension/`** — a cross-browser extension: a popup, plus a ↓ button
   injected into Bandcamp-linked album cards on `badger.greenlight.hr`.
 
@@ -21,8 +22,8 @@ Grab the files for your platform from the **[Releases](../../releases)** page:
 | Firefox | `.xpi` / `wax-digger-firefox.zip` | `.xpi` = permanent; zip = temporary via `about:debugging`. |
 
 The desktop app bundles everything — no Python, yt-dlp, or ffmpeg to install.
-Run it, then use the web UI, the extension popup, or the ↓ button on
-badger.greenlight.hr.
+Run it — the WAX window opens on your desktop. The extension popup and the ↓
+button on badger.greenlight.hr talk to the same local server.
 
 ## Build / release (maintainers)
 
@@ -41,7 +42,7 @@ GitHub Actions then builds and attaches to a single Release:
 ### Local builds
 
 ```bash
-# desktop app (current OS) — needs: pip install pyinstaller pillow flask
+# desktop app (current OS) — needs: pip install pyinstaller pillow flask pywebview
 bash packaging/build_macos.sh        # macOS  → dist/WaxDigger.dmg
 pwsh packaging/build_windows.ps1     # Windows → dist/WaxDigger.exe
 

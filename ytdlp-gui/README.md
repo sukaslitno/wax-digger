@@ -1,4 +1,4 @@
-# YTDLP GUI
+# Wax Digger GUI
 
 Веб-интерфейс для загрузки аудио через yt-dlp. Работает локально на `localhost:7337`.
 
@@ -18,14 +18,14 @@ python3 app.py
 
 ## macOS App Bundle
 
-Дважды кликнуть `YTDLPGui.app` (или перетащить в /Applications).  
+Дважды кликнуть `Wax Digger.app` (или перетащить в /Applications).
 При первом запуске: **правый клик → Открыть** (обход Gatekeeper).
 
-`YTDLPGui.app` и папка `ytdlp-gui/` должны лежать рядом в одной директории.
+`Wax Digger.app` и папка `ytdlp-gui/` должны лежать рядом в одной директории.
 
 ## Конфигурация
 
-Выбранная папка сохранения хранится в `~/.ytdlpgui_config.json`.
+Выбранная папка сохранения хранится в `~/.wax-digger_config.json`.
 
 ## Нативные сборки (DMG / EXE)
 

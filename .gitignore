@@ -20,4 +20,11 @@ __pycache__/
 
 # local config / os
 .DS_Store
-~/.ytdlpgui_config.json
+.wax-digger_config.json
+
+# local python venv
+.venv/
+
+graphify-out/
+tmp/
+output/
