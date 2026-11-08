@@ -21,10 +21,19 @@ __pycache__/
 # local config / os
 .DS_Store
 .wax-digger_config.json
+# User-supplied GoFi installation contains a session and music. The clean
+# source used for builds lives in vendor/gofi instead.
+deezload/
 
 # local python venv
 .venv/
 
+# agent / AI tool files (local only, not for version control)
+CLAUDE.md
+.claude/
+.aider*
+.cursorrules
+*.claude_session
 graphify-out/
 tmp/
 output/

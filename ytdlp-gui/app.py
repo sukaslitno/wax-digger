@@ -8,6 +8,7 @@ import sys
 import tempfile
 import threading
 import time
+from urllib.parse import urlsplit
 
 import webview
 from flask import Flask, Response, jsonify, render_template, request, send_from_directory
@@ -81,8 +82,44 @@ def find_ffmpeg_location():
 
 YTDLP_CMD = find_ytdlp()
 FFMPEG_LOCATION = find_ffmpeg_location()
-
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".wax-digger_config.json")
+
+
+def find_gofi():
+    bundled = bundled_binary("wax-gofi")
+    if bundled:
+        return bundled
+    exe = "wax-gofi.exe" if IS_WINDOWS else "wax-gofi"
+    candidate = os.path.join(os.path.dirname(RES), "packaging", "bin", exe)
+    return candidate if os.path.isfile(candidate) else None
+
+
+def spotify_link(url):
+    try:
+        parsed = urlsplit(url if "://" in url else "https://" + url)
+        return parsed.scheme in ("http", "https") and parsed.hostname in ("open.spotify.com", "www.open.spotify.com")
+    except ValueError:
+        return False
+
+
+def existing_gofi_session():
+    # Store only the path, never the credential, in Wax's settings.
+    try:
+        with open(CONFIG_PATH, encoding="utf-8") as f:
+            path = json.load(f).get("gofi_config_path", "")
+    except (OSError, ValueError, AttributeError):
+        path = ""
+    if not path and not getattr(sys, "frozen", False):
+        path = os.path.join(os.path.dirname(RES), "deezload", "DeezLoader-Reborn", "GoFi", "d-fi.config.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            return str(json.load(f).get("cookies", {}).get("arl", "")).strip()
+    except (OSError, ValueError, TypeError, AttributeError):
+        return ""
+
+
+deezer_arl = os.environ.get("DEEZER_ARL", "").strip() or existing_gofi_session()
+
 DEFAULT_FOLDER = os.path.join(os.path.expanduser("~"), "Downloads")
 TEMP_DIR = os.path.join(tempfile.gettempdir(), "wax-digger-temp")
 
@@ -202,6 +239,21 @@ def choose_folder():
     return jsonify({"path": load_config().get("output_path", DEFAULT_FOLDER)})
 
 
+@app.route("/deezer-session", methods=["GET", "POST"])
+def deezer_session():
+    global deezer_arl
+    # This endpoint accepts secrets only from Wax itself, not browser extensions.
+    origin = request.headers.get("Origin")
+    if origin and origin != URL:
+        return jsonify({"error": "Origin not allowed"}), 403
+    if request.method == "POST":
+        value = (request.get_json(silent=True) or {}).get("arl", "")
+        if not isinstance(value, str) or len(value.strip()) != 192:
+            return jsonify({"error": "ARL must be 192 characters"}), 400
+        deezer_arl = value.strip()
+    return jsonify({"available": bool(deezer_arl)})
+
+
 @app.route("/download", methods=["POST"])
 def download():
     data = request.json
@@ -212,6 +264,16 @@ def download():
 
     if not url:
         return jsonify({"error": "URL is required"}), 400
+
+    is_spotify = spotify_link(url)
+    if is_spotify:
+        if fmt not in ("mp3_128", "mp3_320", "flac"):
+            return jsonify({"error": "Deezer supports MP3 128, MP3 320 and FLAC"}), 400
+        gofi = find_gofi()
+        if not gofi:
+            return jsonify({"error": "Deezer downloader is not installed in this build"}), 503
+        if not deezer_arl:
+            return jsonify({"error": "Connect Deezer first"}), 400
 
     fmt_args = FORMATS.get(fmt, FORMATS["mp3_320"])
     os.makedirs(TEMP_DIR, exist_ok=True)
@@ -238,23 +300,38 @@ def download():
 
     def run():
         proc = None
+        workdir = None
         try:
             kwargs = {}
             if IS_WINDOWS:
                 # don't pop a console window for the child process
                 kwargs["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
+            workdir = tempfile.TemporaryDirectory(prefix="wax-gofi-") if is_spotify else None
+            child_cmd = [gofi] if is_spotify else cmd
             proc = subprocess.Popen(
-                cmd,
+                child_cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
+                stdin=subprocess.PIPE if is_spotify else None,
+                cwd=workdir.name if workdir else None,
                 text=True,
                 bufsize=1,
                 **kwargs,
             )
             active_procs.add(proc)
+            if is_spotify:
+                payload = {"url": url if "://" in url else "https://" + url,
+                           "quality": {"mp3_128": "128", "mp3_320": "320", "flac": "flac"}[fmt],
+                           "output": os.path.abspath(output_path), "arl": deezer_arl}
+                json.dump(payload, proc.stdin)
+                proc.stdin.close()
             for line in proc.stdout:
                 line = line.rstrip()
-                q.put(line)
+                if is_spotify:
+                    if line.startswith("WAX_EVENT:"):
+                        q.put("__WAX__:" + line[len("WAX_EVENT:"):])
+                else:
+                    q.put(line)
                 if "Destination:" in line:
                     parts = line.split("Destination:")
                     if len(parts) > 1:
@@ -272,6 +349,8 @@ def download():
             q.put(f"ERROR: {e}")
         finally:
             active_procs.discard(proc)
+            if is_spotify and workdir:
+                workdir.cleanup()
             q.put(f"__DONE__:{status}")
 
     threading.Thread(target=run, daemon=True).start()
@@ -319,6 +398,7 @@ class Api:
 
     def __init__(self):
         self.window = None
+        self.menu_bar_ready = False
 
     def resize(self, height):
         # The window is a fixed-width 600px modal; only its height follows the screen.
@@ -337,12 +417,26 @@ class Api:
         if self.window:
             self.window.minimize()
 
-    def quit(self):
+    def open_window(self):
+        if self.window:
+            self.window.restore()
+            self.window.show()
+
+    def close_window(self):
+        if self.window and self.menu_bar_ready:
+            self.window.hide()
+        else:
+            self.quit()
+
+    def stop_downloads(self):
         for p in list(active_procs):
             try:
                 p.terminate()
             except Exception:
                 pass
+
+    def quit(self):
+        self.stop_downloads()
         if self.window:
             # destroy() straight from a js_api call hangs the app: pywebview's
             # bridge thread then waits forever for a return value the stopped
@@ -398,6 +492,61 @@ def _set_dock_icon():
         pass
 
 
+# Cocoa objects must be retained for the lifetime of the application.
+_status_item = None
+_status_delegate = None
+
+
+def _install_menu_bar(api):
+    """Install a native macOS status menu while the main thread owns Cocoa."""
+    global _status_item, _status_delegate
+    if sys.platform != "darwin":
+        return False
+    try:
+        from AppKit import NSImage, NSMenu, NSMenuItem, NSStatusBar, NSVariableStatusItemLength
+        from Foundation import NSObject
+
+        class WaxStatusDelegate(NSObject):
+            def openWindow_(self, sender):
+                api.open_window()
+
+            def hideWindow_(self, sender):
+                api.close_window()
+
+            def quitApp_(self, sender):
+                api.quit()
+
+        icon_path = os.path.join(RES, "templates", "menu-bar-w.png")
+        icon = NSImage.alloc().initWithContentsOfFile_(icon_path)
+        if icon is not None:
+            icon.setSize_((18, 18))
+        else:
+            # Keep the menu available even if a build is missing the asset.
+            icon = NSImage.imageWithSystemSymbolName_accessibilityDescription_("opticaldisc", "Wax")
+        if icon is None:
+            return False
+        icon.setTemplate_(True)
+        delegate = WaxStatusDelegate.alloc().init()
+        menu = NSMenu.alloc().init()
+        for title, selector in (("Open Wax", "openWindow:"), ("Hide Wax", "hideWindow:")):
+            item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(title, selector, "")
+            item.setTarget_(delegate)
+            menu.addItem_(item)
+        menu.addItem_(NSMenuItem.separatorItem())
+        item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Quit Wax", "quitApp:", "")
+        item.setTarget_(delegate)
+        menu.addItem_(item)
+        status = NSStatusBar.systemStatusBar().statusItemWithLength_(NSVariableStatusItemLength)
+        status.button().setImage_(icon)
+        status.button().setToolTip_("Wax")
+        status.setMenu_(menu)
+        _status_item, _status_delegate = status, delegate
+        return True
+    except Exception:
+        # Without an icon, closing must still exit rather than hide the only UI.
+        return False
+
+
 def main():
     # A second launch does not start another server — it just shows a window on
     # the one that is already running.
@@ -426,6 +575,8 @@ def main():
         background_color="#000000",
         js_api=api,
     )
+    api.window.events.closing += api.stop_downloads
+    api.menu_bar_ready = _install_menu_bar(api)
     webview.start()
 
 

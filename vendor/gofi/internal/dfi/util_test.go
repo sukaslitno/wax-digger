@@ -1,0 +1,105 @@
+package dfi
+
+import (
+	"testing"
+
+	"github.com/d-fi/GoFi/types"
+)
+
+func TestSignaleMessages(t *testing.T) {
+	tests := map[string]string{
+		info("hello world"):    "ℹ info hello world",
+		warn("hello world"):    "⚠ warn hello world",
+		pending("hello world"): "● pending hello world",
+		success("hello world"): "✔ success hello world",
+		failure("hello world"): "✖ error hello world",
+		note("hello world"):    "  → hello world",
+	}
+	for actual, expected := range tests {
+		if actual != expected {
+			t.Fatalf("%q != %q", actual, expected)
+		}
+	}
+}
+
+func TestFormatSecondsReadable(t *testing.T) {
+	if got := formatSecondsReadable(96); got != "01m 36s" {
+		t.Fatalf("formatSecondsReadable(96) = %q", got)
+	}
+}
+
+func TestSaveLayout(t *testing.T) {
+	track := types.TrackType{}
+	track.SNG_TITLE = "Harder, Better, Faster, Stronger"
+	track.ART_NAME = "Daft Punk"
+	track.ALB_TITLE = "Discovery"
+	track.TRACK_NUMBER = types.StringOrInt(4)
+
+	layout := SaveLayout(track, map[string]any{"ALB_TITLE": "Discovery"}, "{ALB_TITLE}/{ART_NAME}/{SNG_TITLE}", true, 14)
+	if layout != "Discovery/Daft Punk/04 - Harder, Better, Faster, Stronger" {
+		t.Fatalf("layout = %q", layout)
+	}
+}
+
+func TestCoverFilePolicyAllowsOnlySingleCoverPerDirectory(t *testing.T) {
+	tracks := []types.TrackType{
+		{SongType: types.SongType{ALB_TITLE: "One", SNG_TITLE: "A", ALB_PICTURE: "cover-a"}},
+		{SongType: types.SongType{ALB_TITLE: "Two", SNG_TITLE: "B", ALB_PICTURE: "cover-b"}},
+	}
+
+	policy := CoverFilePolicy(tracks, nil, "Music/{SNG_TITLE}", true)
+	if policy["Music"] {
+		t.Fatal("mixed album folder should not save cover.jpg")
+	}
+
+	policy = CoverFilePolicy(tracks, nil, "Music/{ALB_TITLE}/{SNG_TITLE}", true)
+	if !policy["Music/One"] || !policy["Music/Two"] {
+		t.Fatalf("album folders should save cover.jpg: %#v", policy)
+	}
+}
+
+func TestCoverFilePolicyUsesAlbumRootForDiskFolderLayout(t *testing.T) {
+	tracks := []types.TrackType{
+		{SongType: types.SongType{ALB_TITLE: "Album", SNG_TITLE: "A", ALB_PICTURE: "cover-a", DISK_NUMBER: 1}},
+		{SongType: types.SongType{ALB_TITLE: "Album", SNG_TITLE: "B", ALB_PICTURE: "cover-a", DISK_NUMBER: 2}},
+	}
+	info := map[string]any{"ALB_TITLE": "Album", "NUMBER_DISK": 2}
+	layout := "Music/{ALB_TITLE}/{DISK_FOLDER}/{SNG_TITLE}"
+
+	policy := CoverFilePolicy(tracks, info, layout, true)
+	if !policy["Music/Album"] {
+		t.Fatalf("album root should save cover.jpg: %#v", policy)
+	}
+	if policy["Music/Album/CD1"] || policy["Music/Album/CD2"] {
+		t.Fatalf("disc folders should not save cover.jpg: %#v", policy)
+	}
+	if got := coverFileDir("Music/Album/CD1/01 - A.mp3", layout); got != "Music/Album" {
+		t.Fatalf("coverFileDir = %q, want Music/Album", got)
+	}
+}
+
+func TestCoverFilePolicyKeepsSingleDiscCoverInAlbumFolderWithDiskFolderLayout(t *testing.T) {
+	tracks := []types.TrackType{
+		{SongType: types.SongType{ALB_TITLE: "Album", SNG_TITLE: "A", ALB_PICTURE: "cover-a", DISK_NUMBER: 1}},
+	}
+	info := map[string]any{"ALB_TITLE": "Album", "NUMBER_DISK": 1}
+	layout := "Music/Artist/{ALB_TITLE}/{DISK_FOLDER}/{SNG_TITLE}"
+
+	policy := CoverFilePolicy(tracks, info, layout, true)
+	if !policy["Music/Artist/Album"] {
+		t.Fatalf("album folder should save cover.jpg: %#v", policy)
+	}
+	if policy["Music/Artist"] {
+		t.Fatalf("artist folder should not save cover.jpg: %#v", policy)
+	}
+	if got := coverFileDir("Music/Artist/Album/01 - A.mp3", layout); got != "Music/Artist/Album" {
+		t.Fatalf("coverFileDir = %q, want Music/Artist/Album", got)
+	}
+}
+
+func TestCommonPath(t *testing.T) {
+	got := commonPath([]string{"Playlist/Test", "Playlist/Test/Sub"})
+	if got != "Playlist/Test" {
+		t.Fatalf("commonPath = %q", got)
+	}
+}

@@ -123,8 +123,10 @@ html, body {
 .stack { display: flex; flex-direction: column; gap: 12px; width: 536px; }
 .row   { display: flex; gap: 4px; width: 536px; }
 .row--info { gap: 4px; }
+.status-text { width: 536px; color: rgba(255,255,255,.7); font-size: 13px; line-height: 18px; text-align: center; overflow-wrap: anywhere; }
+.status-text[data-error="true"] { color: var(--red); }
 #urlInput { width: 536px; }
-#folderInput { flex: 1; min-width: 1px; }
+#folderInput, #deezerInput { flex: 1; min-width: 1px; }
 
 /* ===== progress overlay ===== */
 .progress { position: absolute; inset: 0; pointer-events: none; z-index: 10; }
@@ -214,7 +216,7 @@ html, body {
           <path opacity="0.5" d="M10.409 17.834C9.92141 17.3464 9.53465 16.7677 9.27078 16.1307C9.00691 15.4937 8.8711 14.8109 8.8711 14.1215C8.8711 13.432 9.00691 12.7492 9.27078 12.1122C9.53465 11.4753 9.92141 10.8965 10.409 10.409L11.823 8.99496C11.8967 8.9263 11.9558 8.8435 11.9968 8.7515C12.0377 8.6595 12.0598 8.56019 12.0616 8.45948C12.0633 8.35878 12.0448 8.25875 12.0071 8.16536C11.9694 8.07197 11.9132 7.98714 11.842 7.91592C11.7708 7.8447 11.686 7.78856 11.5926 7.75084C11.4992 7.71312 11.3992 7.69459 11.2985 7.69637C11.1977 7.69815 11.0984 7.72019 11.0064 7.76118C10.9144 7.80217 10.8316 7.86127 10.763 7.93496L9.34698 9.34696C8.0811 10.6128 7.36993 12.3297 7.36993 14.12C7.36993 15.9102 8.0811 17.6271 9.34698 18.893C10.6129 20.1588 12.3298 20.87 14.12 20.87C15.9102 20.87 17.6271 20.1588 18.893 18.893L21.722 16.065C22.6435 15.1436 23.2787 13.9751 23.5507 12.7006C23.8228 11.4262 23.7201 10.1002 23.255 8.88281C22.79 7.66543 21.9825 6.6087 20.93 5.84019C19.8776 5.07169 18.6251 4.62427 17.324 4.55196C17.2256 4.54651 17.1271 4.56049 17.0342 4.59309C16.9412 4.6257 16.8556 4.6763 16.7822 4.74199C16.634 4.87467 16.5445 5.06081 16.5335 5.25946C16.5225 5.45811 16.5908 5.65299 16.7235 5.80124C16.8562 5.94949 17.0423 6.03895 17.241 6.04996C18.2528 6.10642 19.2267 6.45452 20.0451 7.05227C20.8635 7.65001 21.4913 8.47183 21.8529 9.41855C22.2145 10.3653 22.2944 11.3964 22.0829 12.3875C21.8714 13.3786 21.3775 14.2873 20.661 15.004L17.832 17.833C16.8474 18.8173 15.5122 19.3703 14.12 19.3703C12.7277 19.3703 11.3925 18.8173 10.408 17.833" fill="currentColor"/>
         </svg>
       </span>
-      <input id="url" type="text" placeholder="paste a track link" autocomplete="off" spellcheck="false">
+      <input id="url" type="text" placeholder="paste a track / album / playlist link" autocomplete="off" spellcheck="false">
       <button type="button" class="btn btn--white input__chip" id="fmtChip">MP3 128K</button>
     </label>
 
@@ -231,9 +233,16 @@ html, body {
       </label>
       <button type="button" class="btn btn--white" id="browseBtn">browse</button>
     </div>
+    <div class="row" id="deezerRow" hidden>
+      <label class="input" id="deezerInput">
+        <input id="deezerArl" type="password" placeholder="Deezer ARL" aria-label="Deezer ARL" autocomplete="off" spellcheck="false">
+      </label>
+      <button type="button" class="btn btn--white" id="connectDeezer">connect</button>
+    </div>
   </div>
 
   <button type="button" class="btn btn--yellow btn--full" id="actionBtn" hidden>GRAB THE WAX</button>
+  <p class="status-text" id="downloadStatus" role="status" aria-live="polite" hidden></p>
 
   <!-- ===== info screen ===== -->
   <div class="info__text" id="infoText" hidden>
@@ -302,8 +311,13 @@ html, body {
 </div>
 
 <script>
-// links for the info screen — user will supply them; empty = click is a no-op
-const LINKS = { github: "", x: "", telegram: "", donate: "" };
+// Links shown on the info screen.
+const LINKS = {
+  github: "https://github.com/sukaslitno/wax-digger",
+  x: "https://x.com/verbazilla",
+  telegram: "https://t.me/insideverbes",
+  donate: "https://pay.cloudtips.ru/p/2f3e88eb",
+};
 
 const ICON_INFO = document.getElementById("cornerIcon").innerHTML;
 const ICON_CLOSE = `<svg viewBox="0 0 24 24" fill="none">
@@ -329,6 +343,15 @@ let info = false;
 let urlInvalid = false;
 let lastHeight = 0;
 let doneTimer = 0;
+let deezerAvailable = false;
+let statusMessage = "";
+let statusError = false;
+
+function isSpotify(value) {
+  return /^(?:open|www\.open)\.spotify\.com$/.test(hostOf(value.trim()) || "");
+}
+
+function availableFormats() { return isSpotify(urlEl.value) ? FORMATS.slice(0, 3) : FORMATS; }
 
 // Returns the bridge call's promise, or null when running in a plain browser.
 function api(name, ...args) {
@@ -356,9 +379,15 @@ function isLikelyUrl(value) {
 function render() {
   const hasUrl = isLikelyUrl(urlEl.value);
   const hasFolder = !!folderEl.value.trim();
+  const spotify = isSpotify(urlEl.value);
+  const needsDeezer = spotify && !deezerAvailable;
+  if (spotify && fmtIndex > 2) fmtIndex = 0;
+  el("fmtChip").textContent = FORMATS[fmtIndex][1];
 
   el("mainScreen").hidden = info;
   el("folderRow").hidden = info || !hasUrl;
+  el("deezerRow").hidden = info || !hasUrl || !needsDeezer;
+  el("deezerArl").placeholder = deezerAvailable ? "Deezer ARL (change session)" : "Deezer ARL";
   actionBtn.hidden = info || !hasUrl || !hasFolder;
   el("infoText").hidden = !info;
   el("infoRow").hidden = !info;
@@ -377,11 +406,14 @@ function render() {
     (phase === "error" ? "btn--red" : phase === "busy" || phase === "done" ? "btn--white" : "btn--yellow");
   actionBtn.textContent =
     phase === "error" ? "ERROR" : (phase === "busy" || phase === "done") ? "WAIT" : "GRAB THE WAX";
-  actionBtn.disabled = phase === "busy" || phase === "done" || urlInvalid;
+  actionBtn.disabled = phase === "busy" || phase === "done" || urlInvalid || needsDeezer;
+  el("downloadStatus").hidden = info || !statusMessage;
+  el("downloadStatus").textContent = statusMessage;
+  el("downloadStatus").dataset.error = String(statusError);
 
   progressEl.hidden = info || phase === "idle";
 
-  resize(info ? 396 : !hasUrl ? 260 : !hasFolder ? 336 : 432);
+  resize(info ? 396 : (!hasUrl ? 260 : !hasFolder ? 336 : 432) + (hasUrl && needsDeezer ? 76 : 0) + (statusMessage ? 50 : 0));
 }
 
 function setProgress(pct) {
@@ -390,7 +422,7 @@ function setProgress(pct) {
 
 // ===== format chip =====
 el("fmtChip").addEventListener("click", () => {
-  fmtIndex = (fmtIndex + 1) % FORMATS.length;
+  fmtIndex = (fmtIndex + 1) % availableFormats().length;
   el("fmtChip").textContent = FORMATS[fmtIndex][1];
 });
 
@@ -403,6 +435,23 @@ async function loadFolder() {
   render();
 }
 
+async function loadDeezer() {
+  try { deezerAvailable = (await (await fetch("/deezer-session")).json()).available; } catch (e) {}
+  render();
+}
+el("connectDeezer").addEventListener("click", async () => {
+  try {
+    const response = await fetch("/deezer-session", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({arl:el("deezerArl").value})});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error);
+    deezerAvailable = true;
+    el("deezerArl").value = "";
+    statusMessage = "Deezer session added for this launch";
+    statusError = false;
+  } catch (e) { statusMessage = e.message; statusError = true; }
+  render();
+});
+
 el("browseBtn").addEventListener("click", async () => {
   const d = await (await fetch("/choose-folder", { method: "POST" })).json();
   if (d.path) folderEl.value = d.path;
@@ -412,6 +461,8 @@ el("browseBtn").addEventListener("click", async () => {
 // ===== download =====
 async function startDownload() {
   phase = "busy";
+  statusMessage = isSpotify(urlEl.value) ? "Connecting to Deezer…" : "";
+  statusError = false;
   progressEl.dataset.state = "";
   setProgress(0);
   render();
@@ -433,12 +484,28 @@ async function startDownload() {
   if (error || !stream_id) { fail(error); return; }
 
   let pct = 0;
+  let waxResult = null;
   const es = new EventSource("/progress/" + stream_id);
   es.onmessage = (e) => {
     const data = e.data;
     if (data.startsWith("__DONE__:")) {
       es.close();
-      data.endsWith(":done") ? succeed() : fail(data);
+      if (data.endsWith(":done")) succeed();
+      else fail(waxResult || statusMessage || "Download failed");
+      return;
+    }
+    if (data.startsWith("__WAX__:")) {
+      try {
+        const event = JSON.parse(data.slice(8));
+        if (event.type === "status" || event.type === "progress") statusMessage = event.message;
+        if (event.type === "progress") setProgress(event.percent);
+        if (event.type === "error") {
+          waxResult = event.message;
+          if (event.message.startsWith("Could not connect to Deezer")) deezerAvailable = false;
+        }
+        if (event.type === "result") waxResult = `${event.saved} of ${event.total} saved; ${event.failed} not saved`;
+        render();
+      } catch (e) {}
       return;
     }
     if (!data.trim()) return;
@@ -452,6 +519,7 @@ async function startDownload() {
 
 function succeed() {
   phase = "done";
+  if (isSpotify(urlEl.value)) statusMessage = "Download complete";
   setProgress(100);
   progressEl.dataset.state = "done";
   render();
@@ -461,6 +529,8 @@ function succeed() {
 function reset() {
   clearTimeout(doneTimer);
   phase = "idle";
+  statusMessage = "";
+  statusError = false;
   progressEl.dataset.state = "";
   setProgress(0);
   render();
@@ -469,6 +539,8 @@ function reset() {
 function fail(reason) {
   if (reason) console.error("[wax]", reason);
   phase = "error";
+  statusMessage = reason || "Download failed";
+  statusError = true;
   progressEl.dataset.state = "error";
   render();
 }
@@ -492,12 +564,12 @@ el("infoRow").addEventListener("click", (e) => {
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   if (info) { info = false; render(); return; }
-  api("quit");
+  api("close_window");
 });
 
 // ===== URL validation (DRM-only services have no yt-dlp extractor) =====
 const UNSUPPORTED = [
-  /(^|\.)spotify\.com$/, /(^|\.)music\.apple\.com$/, /(^|\.)itunes\.apple\.com$/,
+  /(^|\.)music\.apple\.com$/, /(^|\.)itunes\.apple\.com$/,
   /(^|\.)deezer\.com$/, /(^|\.)tidal\.com$/, /music\.amazon\./, /(^|\.)pandora\.com$/,
   /(^|\.)qobuz\.com$/, /(^|\.)napster\.com$/, /(^|\.)audible\.com$/, /(^|\.)shazam\.com$/,
 ];
@@ -542,7 +614,7 @@ function hideTools() {
 
 winTools.addEventListener("mouseenter", showTools);
 winTools.addEventListener("mouseleave", hideTools);
-el("winClose").addEventListener("click", () => api("quit"));
+el("winClose").addEventListener("click", () => api("close_window"));
 el("winMin").addEventListener("click", () => api("minimize"));
 
 // The look follows the OS, asked from the bridge — a browser dev session has
@@ -560,6 +632,7 @@ window.addEventListener("pywebviewready", initTools);
 if (window.pywebview) initTools();  // in case the bridge landed before this ran
 
 loadFolder();
+loadDeezer();
 urlEl.focus();
 </script>
 </body>

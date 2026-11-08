@@ -13,6 +13,10 @@ function Invoke-Checked {
 
 Invoke-Checked { python packaging\fetch_binaries.py }
 Invoke-Checked { python packaging\make_icons.py }
+New-Item -ItemType Directory -Force packaging\bin | Out-Null
+Push-Location vendor\gofi
+try { Invoke-Checked { go build -o ..\..\packaging\bin\wax-gofi.exe .\cmd\wax-gofi } }
+finally { Pop-Location }
 
 if (Test-Path build) { Remove-Item -Recurse -Force build }
 if (Test-Path dist)  { Remove-Item -Recurse -Force dist }
@@ -29,6 +33,7 @@ Invoke-Checked {
   pyinstaller --noconfirm --onefile --windowed --name "WaxDigger" `
     --icon packaging\icon.ico `
     --add-data "ytdlp-gui\templates;templates" `
+    --add-data "vendor\gofi\LICENSE;licenses\gofi" `
     --collect-all webview `
     @binArgs `
     ytdlp-gui\app.py

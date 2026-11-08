@@ -25,6 +25,20 @@ The desktop app bundles everything — no Python, yt-dlp, or ffmpeg to install.
 Run it — the WAX window opens on your desktop. The extension popup and the ↓
 button on badger.greenlight.hr talk to the same local server.
 
+Spotify track, album and public playlist links use the bundled GoFi downloader
+to find matching tracks on Deezer. A Deezer session (ARL) is required. Wax
+accepts an ARL in the app for the current launch; it is not saved by Wax. In a
+source checkout, Wax can also use the GoFi config in the local `deezload/`
+folder. For an installed build, `gofi_config_path` in
+`~/.wax-digger_config.json` can point to an existing GoFi config; Wax stores
+only the path there. Keep this config private.
+
+Spotify downloads offer MP3 128, MP3 320 and FLAC. Availability depends on the
+Deezer account and catalog. Wax does not silently lower quality, and reports
+partial results when tracks cannot be matched or saved. Existing target files
+are left untouched. Spotify's services and catalog matching can change, and a
+playlist may contain tracks unavailable on Deezer.
+
 ## Build / release (maintainers)
 
 Everything is automated by `.github/workflows/release.yml`. Push a version tag:
@@ -42,7 +56,7 @@ GitHub Actions then builds and attaches to a single Release:
 ### Local builds
 
 ```bash
-# desktop app (current OS) — needs: pip install pyinstaller pillow flask pywebview
+# desktop app (current OS) — needs Go 1.25+ and: pip install pyinstaller pillow flask pywebview
 bash packaging/build_macos.sh        # macOS  → dist/WaxDigger.dmg
 pwsh packaging/build_windows.ps1     # Windows → dist/WaxDigger.exe
 
@@ -59,3 +73,5 @@ details and [`ytdlp-gui/README.md`](ytdlp-gui/README.md) for the server.
   first-launch override is needed. Code-signing can be added later.
 - `packaging/fetch_binaries.py` downloads the right `yt-dlp`/`ffmpeg` for the
   current OS into `packaging/bin/`; `build_*` scripts call it automatically.
+- `vendor/gofi` contains the MIT-licensed GoFi source at upstream commit
+  `fa56122`; `cmd/wax-gofi` is Wax's adapter. The bundled app includes its license.
