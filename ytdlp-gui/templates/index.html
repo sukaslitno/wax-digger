@@ -125,6 +125,7 @@ html, body {
 .row--info { gap: 4px; }
 .status-text { width: 536px; color: rgba(255,255,255,.7); font-size: 13px; line-height: 18px; text-align: center; overflow-wrap: anywhere; }
 .status-text[data-error="true"] { color: var(--red); }
+.status-text[data-clip="true"] { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #urlInput { width: 536px; }
 #folderInput, #deezerInput { flex: 1; min-width: 1px; }
 
@@ -352,6 +353,11 @@ let doneTimer = 0;
 let deezerAvailable = false;
 let statusMessage = "";
 let statusError = false;
+let drmName = "";        // the DRM-locked service the link in the field belongs to
+let revealPath = "";     // what "show in folder" opens after a finished download
+let appVersion = "", ytdlpVersion = "";
+let handledLink = "";    // the last link the field held: the clipboard never refills it
+const seenLinks = new Set();  // links already handed to the server this session
 
 function isSpotify(value) {
   return /^(?:open|www\.open)\.spotify\.com$/.test(hostOf(value.trim()) || "");
@@ -417,25 +423,30 @@ function render() {
   urlInput.dataset.state = urlInvalid || addFailed ? "error" : "default";
   // the link field stays open for the next link; format and folder belong to
   // the running download until a new link is typed, then to that one
-  const locked = action === "cancel" || phase === "done" || phase === "cancelled";
+  const locked = action === "cancel" || phase === "cancelled";
   el("fmtChip").classList.toggle("locked", locked);
   el("folderRow").classList.toggle("locked", locked);
   // pointer-events alone still leaves the focused field typeable
   folderEl.readOnly = locked;
 
-  const waiting = phase === "done" || phase === "cancelled";
+  const waiting = phase === "cancelled";
   actionBtn.className = "btn btn--full " +
-    (phase === "error" ? "btn--red" : waiting || action === "cancel" ? "btn--white" : "btn--yellow");
+    (phase === "error" ? "btn--red" : waiting || phase === "done" || action === "cancel" ? "btn--white" : "btn--yellow");
   actionBtn.textContent =
-    phase === "error" ? "error" : waiting ? "wait" : action === "cancel" ? "cancel"
-    : action === "add" ? "add to queue" : "grab the wax";
+    phase === "error" ? "error" : waiting ? "wait" : phase === "done" ? "show in folder"
+    : action === "cancel" ? "cancel" : action === "add" ? "add to queue" : "grab the wax";
   actionBtn.disabled = waiting || !!posting ||
     (action === "cancel" ? !jobs.length || jobs[0].cancelling : urlInvalid || needsDeezer);
   const queued = phase === "busy" ? jobs.length - 1 : 0;
-  const status = statusMessage && queued > 0 ? `${statusMessage} · ${queued} queued` : statusMessage;
+  // a link that cannot work says why, until a download has something to report
+  const drm = urlInvalid && phase !== "busy" ? drmMessage(drmName) : "";
+  const status = drm || (statusMessage && queued > 0 ? `${statusMessage} · ${queued} queued` : statusMessage);
   el("downloadStatus").hidden = info || !status;
   el("downloadStatus").textContent = status;
-  el("downloadStatus").dataset.error = String(statusError);
+  el("downloadStatus").dataset.error = String(!!drm || statusError);
+  el("downloadStatus").dataset.clip = String(phase === "done");
+  el("infoMade").textContent = ["made by jeneverbes", appVersion && "v" + appVersion,
+    ytdlpVersion && "yt-dlp " + ytdlpVersion].filter(Boolean).join(" · ");
 
   progressEl.hidden = info || phase === "idle";
 
@@ -448,6 +459,7 @@ function setProgress(pct) {
 
 // ===== format chip =====
 el("fmtChip").addEventListener("click", () => {
+  edited();
   fmtIndex = (fmtIndex + 1) % availableFormats().length;
   el("fmtChip").textContent = FORMATS[fmtIndex][1];
 });
@@ -457,6 +469,15 @@ async function loadFolder() {
   try {
     const d = await (await fetch("/get-folder")).json();
     folderEl.value = d.path || "";
+  } catch (e) {}
+  render();
+}
+
+async function loadStatus() {
+  try {
+    const d = await (await fetch("/status")).json();
+    appVersion = d.version || "";
+    ytdlpVersion = d.ytdlp_version || "";
   } catch (e) {}
   render();
 }
@@ -479,6 +500,7 @@ el("connectDeezer").addEventListener("click", async () => {
 });
 
 el("browseBtn").addEventListener("click", async () => {
+  edited();
   const d = await (await fetch("/choose-folder", { method: "POST" })).json();
   if (d.path) folderEl.value = d.path;
   render();
@@ -497,7 +519,7 @@ async function enqueue() {
   if (first) {
     phase = "busy";
     jobs = [];
-    batch = { saved: 0, failed: 0, cancelled: 0, total: 0, error: "", result: null };
+    batch = { saved: 0, failed: 0, cancelled: 0, total: 0, error: "", result: null, folder: "" };
     statusMessage = isSpotify(url) ? "connecting to deezer…" : "starting…";
     statusError = false;
     progressEl.dataset.state = "";
@@ -526,7 +548,8 @@ async function enqueue() {
     else render();
     return;
   }
-  jobs.push({ id: stream_id, url });
+  seenLinks.add(url);
+  jobs.push({ id: stream_id, url, out: folderEl.value.trim() });
   if (!first && urlEl.value.trim() === url) { urlEl.value = ""; validate(); }
   if (jobs.length === 1) follow(jobs[0]);
   render();
@@ -569,6 +592,7 @@ function finished(job, how, result, errorMessage) {
   if (jobs[0] !== job) return;
   jobs.shift();
   batch.total++;
+  batch.folder = job.out;
   if (how !== "cancelled") batch.result = result;
   if (how === "done") batch.saved++;
   else if (how === "cancelled") batch.cancelled++;
@@ -602,14 +626,22 @@ async function cancelCurrent() {
   // the stream itself ends with __DONE__:cancelled (or finished just before)
 }
 
+function fileName(path) { return String(path).split(/[\\/]/).pop(); }
+
+// Stays on screen, with "show in folder", until the field is touched or the
+// button is used. A single file is named; an album or playlist opens its own
+// folder; several links open the output folder.
 function succeed(result, links = 1) {
+  const paths = (links === 1 && result && result.paths) || [];
+  const single = paths.length === 1 && result.total === 1;
   phase = "done";
   statusMessage = links > 1 ? `${links} of ${links} links saved`
-    : result && result.total > 1 ? savedText(result) : "saved";
+    : result && result.total > 1 ? savedText(result)
+    : single ? fileName(paths[0]) : "saved";
+  revealPath = single ? paths[0] : (links === 1 && result && result.folder) || batch.folder;
   setProgress(100);
   progressEl.dataset.state = "done";
   render();
-  doneTimer = setTimeout(reset, 2000);
 }
 
 function cancelled() {
@@ -645,6 +677,11 @@ function fail(reason) {
 actionBtn.addEventListener("click", () => {
   if (posting) return;
   if (phase === "error") { reset(); return; }
+  if (phase === "done") {
+    if (revealPath) api("reveal", revealPath);
+    reset();
+    return;
+  }
   if (phase === "busy") {
     if (busyAction() === "cancel") cancelCurrent();
     else if (!urlInvalid && folderEl.value.trim()) enqueue();
@@ -654,7 +691,7 @@ actionBtn.addEventListener("click", () => {
 });
 
 // ===== info screen =====
-el("cornerBtn").addEventListener("click", () => { info = !info; render(); });
+el("cornerBtn").addEventListener("click", () => { info = !info; if (info) loadStatus(); render(); });
 
 el("infoRow").addEventListener("click", (e) => {
   const btn = e.target.closest("[data-link]");
@@ -672,10 +709,19 @@ document.addEventListener("keydown", (e) => {
 
 // ===== URL validation (DRM-only services have no yt-dlp extractor) =====
 const UNSUPPORTED = [
-  /(^|\.)music\.apple\.com$/, /(^|\.)itunes\.apple\.com$/,
-  /(^|\.)deezer\.com$/, /(^|\.)tidal\.com$/, /music\.amazon\./, /(^|\.)pandora\.com$/,
-  /(^|\.)qobuz\.com$/, /(^|\.)napster\.com$/, /(^|\.)audible\.com$/, /(^|\.)shazam\.com$/,
+  [/(^|\.)music\.apple\.com$/, "apple music"], [/(^|\.)itunes\.apple\.com$/, "itunes"],
+  [/(^|\.)deezer\.com$/, "deezer"], [/(^|\.)tidal\.com$/, "tidal"], [/music\.amazon\./, "amazon music"],
+  [/(^|\.)pandora\.com$/, "pandora"], [/(^|\.)qobuz\.com$/, "qobuz"], [/(^|\.)napster\.com$/, "napster"],
+  [/(^|\.)audible\.com$/, "audible"], [/(^|\.)shazam\.com$/, "shazam"],
 ];
+
+// The service a host belongs to if it is DRM-locked, else "".
+function drmService(host) {
+  const hit = host && UNSUPPORTED.find(([re]) => re.test(host));
+  return hit ? hit[1] : "";
+}
+
+function drmMessage(name) { return `${name} is drm-locked — try bandcamp, youtube or spotify`; }
 
 function hostOf(value) {
   try {
@@ -685,8 +731,8 @@ function hostOf(value) {
 }
 
 function validate() {
-  const host = hostOf(urlEl.value.trim());
-  urlInvalid = !!host && UNSUPPORTED.some((re) => re.test(host));
+  drmName = drmService(hostOf(urlEl.value.trim()));
+  urlInvalid = !!drmName;
 }
 
 function edited() {
@@ -694,14 +740,60 @@ function edited() {
   if (phase === "error" || phase === "done" || phase === "cancelled") reset();
 }
 
-urlEl.addEventListener("input", () => { edited(); validate(); render(); });
+urlEl.addEventListener("input", () => {
+  const v = urlEl.value.trim();
+  if (v) handledLink = v;
+  edited(); validate(); render();
+});
 folderEl.addEventListener("input", () => { edited(); render(); });
 // Enter adds or grabs, but never cancels a download by accident
 urlEl.addEventListener("keydown", (e) => {
-  if (e.key !== "Enter" || actionBtn.disabled || actionBtn.hidden) return;
+  if (e.key !== "Enter" || actionBtn.disabled || actionBtn.hidden || phase === "done") return;
   if (phase === "busy" && busyAction() === "cancel") return;
   actionBtn.click();
 });
+
+// ===== a link from outside: dropped on the window, or waiting on the clipboard =====
+function setUrl(link) {
+  info = false;
+  urlEl.value = link;
+  handledLink = link;
+  edited(); validate(); render();
+  urlEl.focus();
+}
+
+// The link in a drop: the first uri-list entry, else the plain text, if it is a link.
+function linkFromDrop(uriList, plain) {
+  const first = (text) => (text || "").split(/\r?\n/).map((l) => l.trim()).find((l) => l && !l.startsWith("#")) || "";
+  const link = first(uriList) || first(plain);
+  return isLikelyUrl(link) ? link : "";
+}
+
+// Without these the webview would navigate away to whatever was dropped.
+window.addEventListener("dragenter", (e) => e.preventDefault());
+window.addEventListener("dragover", (e) => {
+  e.preventDefault();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+});
+window.addEventListener("drop", (e) => {
+  e.preventDefault();
+  const dt = e.dataTransfer;
+  const link = dt && linkFromDrop(dt.getData("text/uri-list"), dt.getData("text/plain"));
+  if (link) setUrl(link);
+});
+
+// When the window opens or gains focus with nothing typed, offer a copied link.
+// It only fills the field; starting is the user's call.
+let prefilling = false;
+async function prefillFromClipboard() {
+  if (prefilling || phase !== "idle" || urlEl.value.trim()) return;
+  prefilling = true;
+  try {
+    const link = await api("clipboard_url");
+    if (link && link !== handledLink && !seenLinks.has(link) && phase === "idle" && !urlEl.value.trim()) setUrl(link);
+  } catch (e) {} finally { prefilling = false; }
+}
+window.addEventListener("focus", prefillFromClipboard);
 
 // ===== window controls: hover near the top edge reveals close/minimize =====
 const winTools = el("winTools"), winBar = el("winBar");
@@ -735,6 +827,7 @@ async function initTools() {
     winTools.hidden = false;
   } catch (e) {}
   render();
+  prefillFromClipboard();
 }
 
 window.addEventListener("pywebviewready", initTools);
@@ -742,6 +835,7 @@ if (window.pywebview) initTools();  // in case the bridge landed before this ran
 
 loadFolder();
 loadDeezer();
+loadStatus();
 urlEl.focus();
 </script>
 </body>

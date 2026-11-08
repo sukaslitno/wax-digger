@@ -45,7 +45,7 @@ def main():
     # window controls: markup on the page, actions on the bridge
     for marker in ('id="winTools"', 'id="winClose"', 'id="winMin"'):
         assert marker in page, f"missing {marker}"
-    for method in ("platform", "minimize", "quit"):
+    for method in ("platform", "minimize", "quit", "reveal", "clipboard_url"):
         assert callable(getattr(wax.Api, method, None)), f"bridge lacks {method}()"
 
     # one download pass, one file left behind, one track per link

@@ -24,6 +24,9 @@ PORT = 7337
 URL = f"http://{HOST}:{PORT}"
 IS_WINDOWS = os.name == "nt"
 
+# Shown on the info screen (served by /status). The one place to bump it.
+APP_VERSION = "1.0.2"
+
 # The UI is a fixed 600px-wide modal; height follows the screen it shows
 # (260 empty / 336 folder / 396 info / 432 filled) via Api.resize().
 WINDOW_WIDTH = 600
@@ -293,11 +296,26 @@ def extractor_outdated(line):
     return any(hint in text for hint in ytdlp_update.OUTDATED_HINTS)
 
 
+def common_folder(paths):
+    """The folder that holds all of these files ('' if they share none)."""
+    try:
+        return os.path.commonpath([os.path.dirname(p) for p in paths])
+    except ValueError:
+        return ""
+
+
 _ITEM_RE = re.compile(r"^\[download\] Downloading item (\d+) of (\d+)")
 _PERCENT_RE = re.compile(r"^\[download\]\s+([\d.]+)%")
 _CONVERT_RE = re.compile(r"^\[(ExtractAudio|Metadata|EmbedThumbnail|FixupM4a|FixupM3u8)\]")
 # the audio file of the current item is on disk (converted, or kept as is)
 _DONE_RE = re.compile(r"^\[ExtractAudio\] (Destination: |Not converting audio)|has already been downloaded")
+
+AUDIO_EXTENSIONS = {".mp3", ".flac", ".wav", ".m4a", ".aac", ".opus", ".ogg"}
+_MOVED_RE = re.compile(r'^\[MoveFiles\] Moving file "(.+)" to "(.+)"$')
+_AUDIO_PATH_RE = re.compile(
+    r"^(?:\[ExtractAudio\] Destination: (.+)"
+    r"|\[ExtractAudio\] Not converting audio (.+?);"
+    r"|\[download\] (.+) has already been downloaded)$")
 
 # share of a track's slice of the ring spent downloading; the rest is ffmpeg
 DOWNLOAD_SHARE = 0.9
@@ -310,7 +328,12 @@ class YtdlpProgress:
     ring no longer hits 100% after the first file.
     """
 
-    def __init__(self):
+    def __init__(self, output_path=None, temp_dir=None):
+        # with an output folder given, the tracker also learns where the audio
+        # files ended up (reported as paths in the result)
+        self.output_path = os.path.abspath(output_path) if output_path else None
+        self.temp_dir = os.path.abspath(temp_dir) if temp_dir else None
+        self.paths = []         # final audio files, in order
         self.index = 1          # current item, 1-based
         self.total = 1          # items in the link (1 for a single track)
         self.playlist = False
@@ -339,8 +362,29 @@ class YtdlpProgress:
         self.last_percent, self.last_message = percent, message
         return [{"type": "progress", "percent": percent, "message": message}]
 
+    def _note_path(self, path, moved=False):
+        """Remember an audio file of this run (as it will lie in the output folder)."""
+        if not self.output_path:
+            return
+        path = os.path.abspath(path.strip().strip("\"'"))
+        if os.path.splitext(path)[1].lower() not in AUDIO_EXTENSIONS:
+            return
+        if not moved and self.temp_dir and path.startswith(self.temp_dir + os.sep):
+            # still in the run's temp dir: it moves to the same place under the output folder
+            path = os.path.join(self.output_path, os.path.relpath(path, self.temp_dir))
+        if path not in self.paths:
+            self.paths.append(path)
+
     def feed(self, line):
         line = line.strip()
+        if self.output_path:
+            m = _MOVED_RE.match(line)
+            if m:
+                self._note_path(m.group(2), moved=True)
+            else:
+                m = _AUDIO_PATH_RE.match(line)
+                if m:
+                    self._note_path(m.group(1) or m.group(2) or m.group(3))
         m = _ITEM_RE.match(line)
         if m:
             self.playlist = True
@@ -384,7 +428,11 @@ class YtdlpProgress:
         if saved == 0 and (self.playlist or not self.failed):
             # a single track's error was already sent when it happened
             events.append({"type": "error", "message": self.first_error or GENERIC_ERROR})
-        events.append({"type": "result", "saved": saved, "failed": self.total - saved, "total": self.total})
+        result = {"type": "result", "saved": saved, "failed": self.total - saved, "total": self.total}
+        if self.output_path and self.paths:
+            result["paths"] = list(self.paths)
+            result["folder"] = common_folder(self.paths) or self.output_path
+        events.append(result)
         return events, ok
 
 
@@ -501,7 +549,8 @@ def font():
 def status():
     cfg = load_config()
     return jsonify({"status": "running", "output_path": cfg.get("output_path", DEFAULT_FOLDER),
-                    "ytdlp_version": ytdlp_manager.known_version()})
+                    "ytdlp_version": ytdlp_manager.known_version(),
+                    "version": APP_VERSION})
 
 
 @app.route("/get-folder")
@@ -730,6 +779,8 @@ def download():
     fmt = data.get("format", "mp3_320")
     output_path = data.get("output_path") or load_config().get("output_path", DEFAULT_FOLDER)
     output_path = os.path.expanduser(output_path)
+    if url:
+        used_output_dirs.add(os.path.abspath(output_path))
 
     if not url:
         return jsonify({"error": "url is required"}), 400
@@ -802,13 +853,15 @@ def run_download(item):
                        "output": os.path.abspath(item.output_path), "arl": deezer_arl}
             json.dump(payload, proc.stdin)
             proc.stdin.close()
-        tracker = None if item.is_spotify else YtdlpProgress()
+        tracker = None if item.is_spotify else YtdlpProgress(item.output_path, item.temp_dir)
         for line in proc.stdout:
             line = line.rstrip()
             if item.is_spotify:
                 if line.startswith("WAX_EVENT:"):
                     event = gofi_event(line[len("WAX_EVENT:"):])
                     if event is not None:
+                        if event.get("type") == "result":
+                            event.setdefault("folder", os.path.abspath(item.output_path))
                         q.put("__WAX__:" + json.dumps(event))
                 continue
             for event in tracker.feed(line):
@@ -830,6 +883,11 @@ def run_download(item):
             if not ok and tracker.outdated and update_after_failure(q):
                 events.insert(-1, {"type": "error", "message": UPDATED_MESSAGE})
             for event in events:
+                if event.get("type") == "result" and "paths" in event:
+                    event["paths"] = [p for p in event["paths"] if os.path.isfile(p)]
+                    if not event["paths"]:  # nothing of it on disk: the page falls back to the output folder
+                        event.pop("paths")
+                        event.pop("folder", None)
                 q.put("__WAX__:" + json.dumps(event))
         status = "done" if ok else "error"
     except _Cancelled:
@@ -903,6 +961,105 @@ def _port_in_use():
         return s.connect_ex((HOST, PORT)) == 0
 
 
+# ---------------------------------------------------------------------------
+# "show in folder": reveal a saved file (or folder) in Finder / Explorer.
+# Only places inside an output folder this app was told to write to qualify,
+# so the bridge cannot be used to open arbitrary paths.
+# ---------------------------------------------------------------------------
+used_output_dirs = set()   # every output folder a download was started with
+
+
+def reveal_roots():
+    roots = set(used_output_dirs)
+    roots.add(os.path.abspath(os.path.expanduser(load_config().get("output_path", DEFAULT_FOLDER))))
+    return roots
+
+
+def reveal_allowed(path, roots):
+    """Is path (a file or folder that exists) inside one of the roots?"""
+    if not isinstance(path, str) or not path or "\0" in path:
+        return False
+    try:
+        real = os.path.realpath(path)
+        if not os.path.exists(real):
+            return False
+        for root in roots:
+            root = os.path.realpath(root)
+            if os.path.commonpath([real, root]) == root:
+                return True
+    except (ValueError, OSError):
+        pass
+    return False
+
+
+def reveal_command(path, is_dir, platform):
+    """argv that shows path in the system file manager (never run through a shell)."""
+    if platform == "darwin":
+        return ["/usr/bin/open", path] if is_dir else ["/usr/bin/open", "-R", path]
+    if platform == "win32":
+        path = os.path.normpath(path)
+        return ["explorer", path] if is_dir else ["explorer", "/select,", path]
+    return ["xdg-open", path if is_dir else os.path.dirname(path)]
+
+
+def reveal_path(path, roots=None, platform=None, popen=subprocess.Popen):
+    """Reveal path if allowed. True if a file manager was started."""
+    roots = reveal_roots() if roots is None else roots
+    if not reveal_allowed(path, roots):
+        return False
+    real = os.path.realpath(path)
+    cmd = reveal_command(real, os.path.isdir(real), platform or sys.platform)
+    try:
+        popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+              **child_popen_kwargs())
+        return True
+    except OSError:
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Clipboard: a copied link is offered in the empty url field. Read natively
+# because navigator.clipboard is unreliable in the system webviews.
+# ---------------------------------------------------------------------------
+def parse_clipboard_url(text):
+    """The text as a link if it is exactly one http(s) link, else ''."""
+    if not isinstance(text, str):
+        return ""
+    text = text.strip()
+    if not text or len(text) > 2048 or re.search(r"\s", text):
+        return ""
+    try:
+        parts = urlsplit(text)
+        host = parts.hostname or ""
+    except ValueError:
+        return ""
+    if parts.scheme.lower() not in ("http", "https"):
+        return ""
+    if not re.fullmatch(r"[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}", host, re.I):
+        return ""
+    return text
+
+
+def read_clipboard_text():
+    if sys.platform == "darwin":
+        cmds = [["/usr/bin/pbpaste"]]
+    elif IS_WINDOWS:
+        cmds = [["powershell", "-NoProfile", "-NonInteractive", "-Command", "Get-Clipboard -Raw"]]
+    else:
+        cmds = [["wl-paste", "--no-newline"], ["xclip", "-selection", "clipboard", "-o"]]
+    for cmd in cmds:
+        if not shutil.which(cmd[0]) and not os.path.isabs(cmd[0]):
+            continue
+        try:
+            kwargs = {"creationflags": CREATE_NO_WINDOW} if IS_WINDOWS else {}
+            r = subprocess.run(cmd, capture_output=True, timeout=3, stdin=subprocess.DEVNULL, **kwargs)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if r.returncode == 0:
+            return r.stdout[:4096].decode("utf-8", errors="replace")
+    return ""
+
+
 QUIT_TITLE = "quit wax?"
 QUIT_MESSAGE = "a download is still running. quitting will stop it."
 
@@ -925,6 +1082,14 @@ class Api:
         # The window is a fixed-width 600px modal; only its height follows the screen.
         if self.window:
             self.window.resize(WINDOW_WIDTH, int(height))
+
+    def reveal(self, path):
+        """Show a saved file (or folder) in Finder / Explorer. True if it was opened."""
+        return reveal_path(path)
+
+    def clipboard_url(self):
+        """The link on the clipboard if it holds exactly one, else ''."""
+        return parse_clipboard_url(read_clipboard_text())
 
     def open_url(self, url):
         if url.startswith(("http://", "https://")):
