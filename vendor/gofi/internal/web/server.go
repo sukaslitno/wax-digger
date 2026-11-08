@@ -1,0 +1,865 @@
+package web
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"reflect"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/d-fi/GoFi/api"
+	"github.com/d-fi/GoFi/internal/dfi"
+	"github.com/d-fi/GoFi/metadata"
+	"github.com/d-fi/GoFi/request"
+	"github.com/d-fi/GoFi/types"
+	"github.com/d-fi/GoFi/utils"
+)
+
+type Options struct {
+	Addr       string
+	ConfigPath string
+}
+
+type Server struct {
+	cfgPath string
+	mux     *http.ServeMux
+
+	mu      sync.Mutex
+	cfg     dfi.Config
+	session sessionState
+	jobs    map[int64]*downloadJob
+	nextID  atomic.Int64
+}
+
+type sessionState struct {
+	Ready    bool   `json:"ready"`
+	UserName string `json:"userName,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
+type downloadJob struct {
+	ID          int64     `json:"id"`
+	Source      string    `json:"source"`
+	Quality     string    `json:"quality"`
+	Status      string    `json:"status"`
+	TotalTracks int       `json:"totalTracks"`
+	DoneTracks  int       `json:"doneTracks"`
+	Progress    float64   `json:"progress"`
+	Current     string    `json:"current,omitempty"`
+	Error       string    `json:"error,omitempty"`
+	Files       []string  `json:"files,omitempty"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+	cancel      context.CancelFunc
+	trackPct    map[int]float64
+}
+
+type configResponse struct {
+	Config dfi.Config   `json:"config"`
+	HasARL bool         `json:"hasArl"`
+	Source sessionState `json:"session"`
+}
+
+type previewRequest struct {
+	Query string `json:"query"`
+}
+
+type searchOptionsRequest struct {
+	Type  string `json:"type"`
+	Query string `json:"query"`
+}
+
+type previewResponse struct {
+	LinkType     string           `json:"linkType"`
+	Tracks       []trackPreview   `json:"tracks"`
+	LayoutFields layoutFieldGroup `json:"layoutFields"`
+}
+
+type layoutFieldGroup struct {
+	Always  []layoutField `json:"always"`
+	Current []layoutField `json:"current"`
+}
+
+type layoutField struct {
+	Key    string `json:"key"`
+	Scope  string `json:"scope"`
+	Sample string `json:"sample,omitempty"`
+}
+
+type trackPreview struct {
+	Index    int    `json:"index"`
+	Position int    `json:"position"`
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	Artist   string `json:"artist"`
+	Album    string `json:"album"`
+	Duration int    `json:"duration"`
+}
+
+type startRequest struct {
+	Query   string `json:"query"`
+	Quality string `json:"quality"`
+	Tracks  []int  `json:"tracks"`
+}
+
+type jobResponse struct {
+	Job *downloadJob `json:"job"`
+}
+
+func Run(ctx context.Context, opts Options) error {
+	if _, err := dfi.CleanupStaleDownloadTemps(".", time.Hour); err != nil {
+		log.Printf("d-fi web stale resumable cleanup failed: %v", err)
+	}
+
+	srv := NewServer(opts)
+	server := &http.Server{
+		Addr:              opts.Addr,
+		Handler:           srv,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	errs := make(chan error, 1)
+	go srv.autoConnect()
+	go func() {
+		log.Printf("d-fi web listening on http://%s", opts.Addr)
+		errs <- server.ListenAndServe()
+	}()
+
+	select {
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = server.Shutdown(shutdownCtx)
+		return ctx.Err()
+	case err := <-errs:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
+	}
+}
+
+func NewServer(opts Options) *Server {
+	if opts.ConfigPath == "" {
+		opts.ConfigPath = "d-fi.config.json"
+	}
+	s := &Server{
+		cfgPath: opts.ConfigPath,
+		cfg:     dfi.LoadConfig(opts.ConfigPath),
+		mux:     http.NewServeMux(),
+		jobs:    map[int64]*downloadJob{},
+	}
+	s.routes()
+	return s
+}
+
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.mux.ServeHTTP(w, r)
+}
+
+func (s *Server) routes() {
+	s.mux.HandleFunc("GET /", s.handleIndex)
+	s.mux.HandleFunc("GET /style.css", s.handleStyle)
+	s.mux.HandleFunc("GET /script.js", s.handleScript)
+	s.mux.HandleFunc("GET /api/config", s.handleConfig)
+	s.mux.HandleFunc("PUT /api/config", s.handleUpdateConfig)
+	s.mux.HandleFunc("POST /api/search-options", s.handleSearchOptions)
+	s.mux.HandleFunc("POST /api/preview", s.handlePreview)
+	s.mux.HandleFunc("POST /api/downloads", s.handleStartDownload)
+	s.mux.HandleFunc("GET /api/jobs", s.handleJobs)
+	s.mux.HandleFunc("DELETE /api/jobs", s.handleClearJobs)
+	s.mux.HandleFunc("POST /api/jobs/{id}/cancel", s.handleCancelJob)
+}
+
+func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write([]byte(indexHTML))
+}
+
+func (s *Server) handleStyle(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	_, _ = w.Write([]byte(styleCSS))
+}
+
+func (s *Server) handleScript(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	_, _ = w.Write([]byte(scriptJS))
+}
+
+func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
+	cfg := s.currentConfig()
+	cfg.Cookies.ARL = ""
+	writeJSON(w, http.StatusOK, configResponse{
+		Config: cfg,
+		HasARL: s.resolveARL() != "",
+		Source: s.currentSession(),
+	})
+}
+
+func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
+	var cfg dfi.Config
+	if err := readJSON(r, &cfg); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	s.mu.Lock()
+	newARL := strings.TrimSpace(cfg.Cookies.ARL)
+	currentARL := s.cfg.Cookies.ARL
+	if cfg.Cookies.ARL == "" {
+		cfg.Cookies.ARL = currentARL
+	}
+	s.cfg.Concurrency = max(1, cfg.Concurrency)
+	s.cfg.SaveLayout = cfg.SaveLayout
+	s.cfg.Playlist = cfg.Playlist
+	s.cfg.TrackNumber = cfg.TrackNumber
+	s.cfg.FallbackTrack = cfg.FallbackTrack
+	s.cfg.FallbackQuality = cfg.FallbackQuality
+	s.cfg.CoverSize.MP3_128 = metadata.NormalizeCoverSize(cfg.CoverSize.MP3_128, s.cfg.CoverSize.MP3_128)
+	s.cfg.CoverSize.MP3_320 = metadata.NormalizeCoverSize(cfg.CoverSize.MP3_320, s.cfg.CoverSize.MP3_320)
+	s.cfg.CoverSize.FLAC = metadata.NormalizeCoverSize(cfg.CoverSize.FLAC, s.cfg.CoverSize.FLAC)
+	if cfg.Cover.Mode != "" {
+		s.cfg.Cover.Mode = metadata.NormalizeCoverMode(cfg.Cover.Mode)
+	}
+	if cfg.Cover.FileName != "" {
+		s.cfg.Cover.FileName = metadata.NormalizeCoverFileName(cfg.Cover.FileName)
+	}
+	s.cfg.Cookies = cfg.Cookies
+	cfgToSave := s.cfg
+	s.mu.Unlock()
+
+	if err := cfgToSave.Save(); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if newARL != "" {
+		if _, err := s.connectWithARL(newARL); err != nil {
+			writeError(w, http.StatusUnauthorized, err)
+			return
+		}
+	}
+	s.handleConfig(w, r)
+}
+
+func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
+	if err := s.ensureSession(); err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
+	var req previewRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	res, err := s.resolveInput(strings.TrimSpace(req.Query))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, previewResponse{
+		LinkType:     res.LinkType,
+		Tracks:       previewTracks(res.Tracks),
+		LayoutFields: layoutFields(res.LinkType, res.LinkInfo, res.Tracks),
+	})
+}
+
+func (s *Server) handleSearchOptions(w http.ResponseWriter, r *http.Request) {
+	if err := s.ensureSession(); err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
+	var req searchOptionsRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	options, err := dfi.SearchOptions(strings.TrimSpace(req.Type), strings.TrimSpace(req.Query), dfi.SearchOptionLimit)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Options []dfi.SearchOption `json:"options"`
+	}{Options: options})
+}
+
+func (s *Server) handleStartDownload(w http.ResponseWriter, r *http.Request) {
+	if err := s.ensureSession(); err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
+
+	var req startRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	req.Query = strings.TrimSpace(req.Query)
+	if req.Query == "" {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("missing URL or search"))
+		return
+	}
+
+	cfg := s.currentConfig()
+	_, _, label, err := dfi.ParseQualityStrict(req.Quality)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	concurrency := cfg.Concurrency
+	if concurrency <= 0 {
+		concurrency = 1
+	}
+	res, err := s.resolveInput(req.Query)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	tracks := dfi.SelectTracksByIndexes(res.Tracks, req.Tracks)
+	if len(tracks) == 0 {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("no tracks selected"))
+		return
+	}
+	pathTemplate := cfg.Layout(res.LinkType)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	job := &downloadJob{
+		ID:          s.nextID.Add(1),
+		Source:      req.Query,
+		Quality:     label,
+		Status:      "queued",
+		TotalTracks: len(tracks),
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+		cancel:      cancel,
+		trackPct:    map[int]float64{},
+	}
+	s.mu.Lock()
+	s.jobs[job.ID] = job
+	s.mu.Unlock()
+
+	go s.runDownloadJob(ctx, job.ID, res.LinkType, res.LinkInfo, tracks, pathTemplate, label, cfg, concurrency)
+	writeJSON(w, http.StatusAccepted, jobResponse{Job: s.snapshotJob(job.ID)})
+}
+
+func (s *Server) handleJobs(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	jobs := make([]*downloadJob, 0, len(s.jobs))
+	for _, job := range s.jobs {
+		jobs = append(jobs, cloneJob(job))
+	}
+	s.mu.Unlock()
+	sortJobs(jobs)
+	writeJSON(w, http.StatusOK, map[string]any{"jobs": jobs})
+}
+
+func (s *Server) handleClearJobs(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	for id, job := range s.jobs {
+		if !isActiveJob(job) {
+			delete(s.jobs, id)
+		}
+	}
+	s.mu.Unlock()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleCancelJob(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	s.mu.Lock()
+	live := s.jobs[id]
+	if live == nil {
+		s.mu.Unlock()
+		writeError(w, http.StatusNotFound, fmt.Errorf("job not found"))
+		return
+	}
+	if live.Status == "queued" || live.Status == "running" {
+		live.Status = "canceling"
+		live.Current = "Canceling download"
+		live.Error = ""
+		live.UpdatedAt = time.Now()
+	}
+	if live.cancel != nil {
+		live.cancel()
+	}
+	s.mu.Unlock()
+	writeJSON(w, http.StatusOK, jobResponse{Job: s.snapshotJob(id)})
+}
+
+func (s *Server) runDownloadJob(ctx context.Context, jobID int64, linkType string, info any, tracks []types.TrackType, pathTemplate, quality string, cfg dfi.Config, concurrency int) {
+	s.updateJob(jobID, func(job *downloadJob) {
+		job.Status = "running"
+	})
+
+	sem := make(chan struct{}, concurrency)
+	var wg sync.WaitGroup
+	var failed atomic.Int64
+	coverPolicy := dfi.CoverFilePolicy(tracks, info, pathTemplate, cfg.TrackNumber)
+
+trackLoop:
+	for i, track := range tracks {
+		if ctx.Err() != nil {
+			break
+		}
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			break trackLoop
+		}
+		wg.Add(1)
+		go func(index int, track types.TrackType) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			if ctx.Err() != nil {
+				return
+			}
+			s.updateJob(jobID, func(job *downloadJob) {
+				job.Current = track.SNG_TITLE + " - " + track.ART_NAME
+			})
+			path, err := dfi.DownloadTrack(ctx, dfi.DownloadTrackOptions{
+				Track:           track,
+				Quality:         quality,
+				Info:            info,
+				CoverSizes:      cfg.CoverSize,
+				CoverMode:       cfg.Cover.Mode,
+				CoverFileName:   cfg.Cover.FileName,
+				CoverFilePolicy: coverPolicy,
+				Path:            pathTemplate,
+				TotalTracks:     len(tracks),
+				TrackNumber:     cfg.TrackNumber,
+				FallbackTrack:   cfg.FallbackTrack,
+				FallbackQuality: cfg.FallbackQuality,
+				Hooks: dfi.DownloadTrackHooks{
+					Status: func(message string) {
+						s.updateJob(jobID, func(job *downloadJob) {
+							job.Current = message
+						})
+					},
+					Progress: func(track types.TrackType, transferred, total int64) {
+						if total <= 0 {
+							return
+						}
+						progress := float64(transferred) / float64(total) * 100
+						s.updateJob(jobID, func(job *downloadJob) {
+							job.trackPct[index] = progress
+							job.Progress = jobProgress(job)
+						})
+					},
+				},
+			})
+			s.updateJob(jobID, func(job *downloadJob) {
+				delete(job.trackPct, index)
+				if err != nil {
+					if ctx.Err() != nil {
+						job.Error = "Canceled by user"
+						return
+					}
+					failed.Add(1)
+					job.Error = err.Error()
+				} else {
+					if ctx.Err() != nil {
+						return
+					}
+					job.DoneTracks++
+					job.Progress = jobProgress(job)
+					if path != "" {
+						job.Files = append(job.Files, path)
+					}
+				}
+			})
+		}(i, track)
+	}
+
+	wg.Wait()
+	playlistPath := ""
+	if ctx.Err() == nil && failed.Load() == 0 && linkType == "playlist" && os.Getenv("SIMULATE") == "" {
+		if job := s.snapshotJob(jobID); job != nil && len(job.Files) > 1 {
+			var err error
+			playlistPath, err = dfi.WritePlaylistFile(info, job.Files, cfg.Playlist.ResolveFullPath)
+			if err != nil {
+				s.updateJob(jobID, func(job *downloadJob) {
+					job.Status = "error"
+					job.Error = err.Error()
+				})
+				return
+			}
+		}
+	}
+	s.updateJob(jobID, func(job *downloadJob) {
+		if ctx.Err() != nil {
+			job.Status = "canceled"
+			job.Error = "Canceled by user"
+			job.Current = ""
+			return
+		}
+		if failed.Load() > 0 {
+			job.Status = "error"
+			return
+		}
+		job.Status = "done"
+		job.Progress = 100
+		job.Current = ""
+		if playlistPath != "" {
+			job.Files = append(job.Files, playlistPath)
+		}
+	})
+}
+
+func (s *Server) resolveInput(query string) (dfi.ResolvedInput, error) {
+	if query == "" {
+		return dfi.ResolvedInput{}, fmt.Errorf("missing URL or search")
+	}
+	if dfi.LooksLikeURL(query) {
+		data, err := dfi.ParseResolvedURL(query)
+		if err != nil {
+			return dfi.ResolvedInput{}, err
+		}
+		tracks := data.Tracks
+		if data.LinkType == "playlist" {
+			tracks = dfi.DedupePlaylistTracks(tracks)
+		}
+		data.Tracks = tracks
+		return data, nil
+	}
+
+	switch {
+	case strings.HasPrefix(query, "artist:"):
+		url, err := dfi.FirstSearchResultURL("artist", strings.TrimPrefix(query, "artist:"))
+		if err != nil {
+			return dfi.ResolvedInput{}, err
+		}
+		return s.resolveInput(url)
+	case strings.HasPrefix(query, "album:"):
+		url, err := dfi.FirstSearchResultURL("album", strings.TrimPrefix(query, "album:"))
+		if err != nil {
+			return dfi.ResolvedInput{}, err
+		}
+		return s.resolveInput(url)
+	case strings.HasPrefix(query, "playlist:"):
+		url, err := dfi.FirstSearchResultURL("playlist", strings.TrimPrefix(query, "playlist:"))
+		if err != nil {
+			return dfi.ResolvedInput{}, err
+		}
+		return s.resolveInput(url)
+	default:
+		data, err := dfi.ResolveTrackSearch(query)
+		if err != nil {
+			return dfi.ResolvedInput{}, err
+		}
+		return data, nil
+	}
+}
+
+func (s *Server) currentConfig() dfi.Config {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cfg
+}
+
+func (s *Server) currentSession() sessionState {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.session
+}
+
+func (s *Server) setSession(state sessionState) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.session = state
+}
+
+func (s *Server) autoConnect() {
+	arl := s.resolveARL()
+	if arl == "" {
+		return
+	}
+	if _, err := s.connectWithARL(arl); err != nil {
+		log.Printf("d-fi web auto-connect failed: %v", err)
+	}
+}
+
+func (s *Server) ensureSession() error {
+	if s.currentSession().Ready {
+		return nil
+	}
+	arl := s.resolveARL()
+	if arl == "" {
+		return fmt.Errorf("missing Deezer ARL")
+	}
+	_, err := s.connectWithARL(arl)
+	return err
+}
+
+func (s *Server) connectWithARL(arl string) (sessionState, error) {
+	arl = strings.TrimSpace(arl)
+	if arl == "" {
+		err := fmt.Errorf("missing Deezer ARL")
+		state := sessionState{Error: err.Error()}
+		s.setSession(state)
+		return state, err
+	}
+	if _, err := request.InitDeezerAPI(arl); err != nil {
+		state := sessionState{Error: err.Error()}
+		s.setSession(state)
+		return state, err
+	}
+	user, err := api.GetUser()
+	if err != nil {
+		state := sessionState{Error: err.Error()}
+		s.setSession(state)
+		return state, err
+	}
+	state := sessionState{Ready: true, UserName: user.BlogName}
+	s.setSession(state)
+	return state, nil
+}
+
+func (s *Server) resolveARL() string {
+	if arl := strings.TrimSpace(os.Getenv("DEEZER_ARL")); arl != "" {
+		return arl
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return strings.TrimSpace(s.cfg.Cookies.ARL)
+}
+
+func (s *Server) updateJob(id int64, update func(*downloadJob)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	job := s.jobs[id]
+	if job == nil {
+		return
+	}
+	update(job)
+	job.UpdatedAt = time.Now()
+}
+
+func (s *Server) snapshotJob(id int64) *downloadJob {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return cloneJob(s.jobs[id])
+}
+
+func cloneJob(job *downloadJob) *downloadJob {
+	if job == nil {
+		return nil
+	}
+	out := *job
+	out.cancel = nil
+	out.trackPct = nil
+	out.Files = append([]string(nil), job.Files...)
+	return &out
+}
+
+func jobProgress(job *downloadJob) float64 {
+	if job.TotalTracks <= 0 {
+		return 0
+	}
+	sum := float64(job.DoneTracks) * 100
+	for _, progress := range job.trackPct {
+		sum += progress
+	}
+	return sum / float64(job.TotalTracks)
+}
+
+func isActiveJob(job *downloadJob) bool {
+	return job != nil && (job.Status == "queued" || job.Status == "running" || job.Status == "canceling")
+}
+
+func sortJobs(jobs []*downloadJob) {
+	sort.SliceStable(jobs, func(i, j int) bool {
+		leftActive := isActiveJob(jobs[i])
+		rightActive := isActiveJob(jobs[j])
+		if leftActive != rightActive {
+			return leftActive
+		}
+		if !jobs[i].UpdatedAt.Equal(jobs[j].UpdatedAt) {
+			return jobs[i].UpdatedAt.After(jobs[j].UpdatedAt)
+		}
+		if !jobs[i].CreatedAt.Equal(jobs[j].CreatedAt) {
+			return jobs[i].CreatedAt.After(jobs[j].CreatedAt)
+		}
+		return jobs[i].ID > jobs[j].ID
+	})
+}
+
+func previewTracks(tracks []types.TrackType) []trackPreview {
+	out := make([]trackPreview, 0, len(tracks))
+	for i, track := range tracks {
+		out = append(out, trackPreview{
+			Index:    i,
+			Position: i + 1,
+			ID:       track.SNG_ID,
+			Title:    track.SNG_TITLE,
+			Artist:   track.ART_NAME,
+			Album:    track.ALB_TITLE,
+			Duration: dfi.AsInt(track.DURATION),
+		})
+	}
+	return out
+}
+
+func layoutFields(linkType string, info any, tracks []types.TrackType) layoutFieldGroup {
+	fields := layoutFieldGroup{
+		Always: []layoutField{
+			{Key: "ALB_TITLE", Scope: "track"},
+			{Key: "ART_NAME", Scope: "track"},
+			{Key: "SNG_TITLE", Scope: "track"},
+			{Key: "DISK_FOLDER", Scope: "derived"},
+			{Key: "DISK_NUMBER", Scope: "track"},
+			{Key: "TRACK_NUMBER", Scope: "special"},
+			{Key: "TRACK_POSITION", Scope: "special"},
+			{Key: "NO_TRACK_NUMBER", Scope: "special"},
+		},
+	}
+	if linkType == "playlist" {
+		fields.Always = append(fields.Always, layoutField{Key: "TITLE", Scope: "playlist"})
+	}
+
+	current := map[string]layoutField{}
+	addLayoutFields(current, "info", utils.StructMap(info))
+	if len(tracks) > 0 {
+		addLayoutFields(current, "track", utils.StructMap(tracks[0]))
+	}
+	if date := layoutReleaseDate(current); date != "" {
+		current["RELEASE_DATE"] = layoutField{Key: "RELEASE_DATE", Scope: "derived", Sample: date}
+		if year := utils.ReleaseYear(date); year != "" {
+			current["RELEASE_YEAR"] = layoutField{Key: "RELEASE_YEAR", Scope: "derived", Sample: year}
+		}
+	}
+	if diskFolder := layoutDiskFolder(current); diskFolder != "" {
+		current["DISK_FOLDER"] = layoutField{Key: "DISK_FOLDER", Scope: "derived", Sample: diskFolder}
+	}
+
+	for i, field := range fields.Always {
+		if currentField, ok := current[field.Key]; ok {
+			fields.Always[i].Sample = currentField.Sample
+		}
+	}
+
+	fields.Current = make([]layoutField, 0, len(current))
+	for _, field := range current {
+		fields.Current = append(fields.Current, field)
+	}
+	sortLayoutFields(fields.Current)
+	return fields
+}
+
+func addLayoutFields(out map[string]layoutField, scope string, data map[string]any) {
+	flattenLayoutFields(out, scope, "", data)
+}
+
+func layoutReleaseDate(fields map[string]layoutField) string {
+	for _, key := range utils.ReleaseDateKeys() {
+		if field, ok := fields[key]; ok && field.Sample != "" && field.Sample != "0000-00-00" {
+			return field.Sample
+		}
+	}
+	return ""
+}
+
+func layoutDiskFolder(fields map[string]layoutField) string {
+	numberDisk, ok := fields["NUMBER_DISK"]
+	if !ok || dfi.AsInt(numberDisk.Sample) <= 1 {
+		return ""
+	}
+	diskNumber, ok := fields["DISK_NUMBER"]
+	if !ok || dfi.AsInt(diskNumber.Sample) <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("CD%d", dfi.AsInt(diskNumber.Sample))
+}
+
+func flattenLayoutFields(out map[string]layoutField, scope, prefix string, value any) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, nested := range typed {
+			next := key
+			if prefix != "" {
+				next = prefix + "." + key
+			}
+			flattenLayoutFields(out, scope, next, nested)
+		}
+	case []any:
+		for i, nested := range typed {
+			next := fmt.Sprintf("%s.%d", prefix, i)
+			flattenLayoutFields(out, scope, next, nested)
+		}
+	default:
+		if prefix == "" {
+			return
+		}
+		if isEmptyLayoutFieldValue(value) {
+			return
+		}
+		sample := fmt.Sprintf("%v", value)
+		if len(sample) > 80 {
+			sample = sample[:77] + "..."
+		}
+		out[prefix] = layoutField{Key: prefix, Scope: scope, Sample: sample}
+	}
+}
+
+func isEmptyLayoutFieldValue(value any) bool {
+	if value == nil {
+		return true
+	}
+	rv := reflect.ValueOf(value)
+	for rv.Kind() == reflect.Pointer || rv.Kind() == reflect.Interface {
+		if rv.IsNil() {
+			return true
+		}
+		rv = rv.Elem()
+	}
+	if !rv.IsValid() || rv.IsZero() {
+		return true
+	}
+	return fmt.Sprintf("%v", value) == "<nil>"
+}
+
+func sortLayoutFields(fields []layoutField) {
+	sort.Slice(fields, func(i, j int) bool {
+		if fields[i].Scope != fields[j].Scope {
+			return fields[i].Scope < fields[j].Scope
+		}
+		return fields[i].Key < fields[j].Key
+	})
+}
+
+func parseID(value string) (int64, error) {
+	id, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || id <= 0 {
+		return 0, fmt.Errorf("invalid job id")
+	}
+	return id, nil
+}
+
+func readJSON(r *http.Request, v any) error {
+	defer r.Body.Close()
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	return decoder.Decode(v)
+}
+
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(value)
+}
+
+func writeError(w http.ResponseWriter, status int, err error) {
+	writeJSON(w, status, map[string]string{"error": err.Error()})
+}
