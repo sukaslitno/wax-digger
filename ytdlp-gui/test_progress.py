@@ -106,7 +106,7 @@ class ProgressTests(unittest.TestCase):
     def test_failure_without_error_line_still_explains(self):
         final, ok = wax.YtdlpProgress().finish(2)
         self.assertFalse(ok)
-        self.assertEqual(final[0], {"type": "error", "message": wax.GENERIC_ERROR})
+        self.assertEqual(final[0], {"type": "error", "message": wax.tr(wax.GENERIC_ERROR)})
 
     def test_already_downloaded_counts_as_saved(self):
         t = wax.YtdlpProgress()
@@ -128,8 +128,8 @@ class FriendlyErrorTests(unittest.TestCase):
         "ERROR: [youtube] xyz: This video is DRM protected": "this one is drm-protected",
         "ERROR: Postprocessing: ffprobe and ffmpeg not found. Please install or provide the path using --ffmpeg-location": "ffmpeg is missing",
         "ERROR: [generic] nothing: Unable to download webpage: HTTP Error 404: Not Found": "this one is gone or unavailable",
-        "ERROR: something nobody has seen before": wax.GENERIC_ERROR,
-        "": wax.GENERIC_ERROR,
+        "ERROR: something nobody has seen before": "couldn't grab this one",
+        "": "couldn't grab this one",
     }
 
     def test_cases(self):
@@ -137,8 +137,10 @@ class FriendlyErrorTests(unittest.TestCase):
             self.assertEqual(wax.friendly_error(line), expected, line)
 
     def test_messages_are_lowercase(self):
-        for _, message in wax.ERROR_MESSAGES:
-            self.assertEqual(message, message.lower())
+        for lang in ("en", "ru"):
+            for _, key in wax.ERROR_MESSAGES:
+                message = wax.tr(key, lang)
+                self.assertEqual(message, message.lower())
 
 
 class GofiEventTests(unittest.TestCase):

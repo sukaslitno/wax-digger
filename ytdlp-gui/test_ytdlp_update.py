@@ -309,7 +309,7 @@ class FailedDownloadTests(unittest.TestCase):
         events, check = self.stream("ERROR: [youtube] abc: Unable to extract nsig function", "current")
         check.assert_called_once_with(force=True)
         errors = [e["message"] for e in events if e["type"] == "error"]
-        self.assertEqual(errors[-1], wax.GENERIC_ERROR)
+        self.assertEqual(errors[-1], wax.tr(wax.GENERIC_ERROR))
 
     def test_bot_check_does_not_update(self):
         events, check = self.stream("ERROR: [youtube] abc: Sign in to confirm you're not a bot", "updated")
@@ -317,7 +317,9 @@ class FailedDownloadTests(unittest.TestCase):
         self.assertNotIn("updating yt-dlp…", [e.get("message") for e in events])
 
     def test_ui_text_is_lowercase(self):
-        self.assertEqual(wax.UPDATED_MESSAGE, wax.UPDATED_MESSAGE.lower())
+        for lang in ("en", "ru"):
+            text = wax.tr(wax.UPDATED_MESSAGE, lang)
+            self.assertEqual(text, text.lower())
 
 
 # Real network, real binaries: WAX_REAL_UPDATE_TEST=1 python -m pytest test_ytdlp_update.py

@@ -18,6 +18,7 @@ import webview
 from flask import Flask, Response, jsonify, render_template, request, send_from_directory
 
 import ytdlp_update
+from i18n import get_language, normalize as normalize_language, set_language, system_language, tr
 
 HOST = "127.0.0.1"
 PORT = 7337
@@ -305,49 +306,55 @@ def build_ytdlp_command(url, fmt, output_path, ytdlp=None, ffmpeg_location=None,
 # ---------------------------------------------------------------------------
 ERROR_MESSAGES = [
     # order matters: specific causes before broad ones like "unable to download"
-    (("drm",), "this one is drm-protected"),
+    (("drm",), "err.drm"),
     (("http error 429", "too many requests", "rate-limit", "rate limit"),
-     "too many requests, try again later"),
+     "err.rate"),
     (("ffmpeg not found", "ffprobe and ffmpeg not found", "ffmpeg is not installed",
-      "ffmpeg could not be found"), "ffmpeg is missing"),
+      "ffmpeg could not be found"), "err.ffmpeg"),
     (("private video", "this video is private", "is private", "private track", "private playlist"),
-     "this one is private"),
+     "err.private"),
     (("confirm your age", "age-restricted", "age restricted", "inappropriate for some users"),
-     "this one is age-restricted"),
-    (("not a bot",), "youtube wants a sign-in, try again later"),
-    (("not available in your country", "not made this video available in your country",
+     "err.age"),
+    (("not a bot",), "err.bot"),
+    (("err.country", "not made this video available in your country",
       "blocked it in your country", "geo restrict", "geo-restrict", "geoblock", "your location"),
-     "not available in your country"),
+     "err.country"),
     (("sign in", "log in", "login required", "logged-in", "members-only", "join this channel",
       "requires authentication", "account cookies", "premium"),
-     "this one needs a sign-in"),
+     "err.signin"),
     (("live event will begin", "premieres in", "is not yet available", "this live stream"),
-     "this stream hasn't started yet"),
-    (("unsupported url", "is not a valid url", "no suitable extractor"), "this link isn't supported"),
+     "err.not_started"),
+    (("unsupported url", "is not a valid url", "no suitable extractor"), "err.unsupported"),
     (("video unavailable", "has been removed", "been terminated", "no longer available",
       "does not exist", "not found", "http error 404", "http error 410", "copyright",
       "is unavailable", "not available", "this track was deleted"),
-     "this one is gone or unavailable"),
-    (("http error 403", "forbidden"), "the site refused the download, try again later"),
+     "err.gone"),
+    (("http error 403", "forbidden"), "err.forbidden"),
     (("failed to resolve", "getaddrinfo", "name or service not known", "nodename nor servname",
       "temporary failure in name resolution", "no address associated", "network is unreachable",
       "connection refused", "connection reset", "timed out", "unable to connect",
       "no route to host", "urlopen error", "errno 8", "errno 11001", "remote end closed",
       "ssl", "unable to download webpage"),
-     "no connection, check your internet"),
-    (("no space left", "disk full"), "the disk is full"),
-    (("permission denied", "read-only file system", "access is denied"), "can't write to that folder"),
+     "err.network"),
+    (("no space left", "disk full"), "err.disk"),
+    (("permission denied", "read-only file system", "access is denied"), "err.no_write"),
 ]
-GENERIC_ERROR = "couldn't grab this one"
+GENERIC_ERROR = "err.generic"  # a key, like the rest of ERROR_MESSAGES
+
+
+def error_key(line):
+    """The message key for a raw yt-dlp ERROR line (GENERIC_ERROR if nothing matches)."""
+    text = (line or "").lower()
+    for needles, key in ERROR_MESSAGES:
+        if any(n in text for n in needles):
+            return key
+    return GENERIC_ERROR
 
 
 def friendly_error(line):
-    """Turn a raw yt-dlp ERROR line into a short lowercase message for the UI."""
-    text = (line or "").lower()
-    for needles, message in ERROR_MESSAGES:
-        if any(n in text for n in needles):
-            return message
-    return GENERIC_ERROR
+    """Turn a raw yt-dlp ERROR line into a short lowercase message for the UI,
+    in the language the window is set to."""
+    return tr(error_key(line))
 
 
 def extractor_outdated(line):
@@ -359,7 +366,7 @@ def extractor_outdated(line):
     text = (line or "").lower()
     if any(hint in text for hint in ytdlp_update.OUTDATED_SURE):
         return True
-    if friendly_error(line) not in (GENERIC_ERROR, "the site refused the download, try again later"):
+    if error_key(line) not in (GENERIC_ERROR, "err.forbidden"):
         return False
     return any(hint in text for hint in ytdlp_update.OUTDATED_HINTS)
 
@@ -400,13 +407,6 @@ _VIDEO_PATH_RE = re.compile(r"^\[download\] (.+) has already been downloaded$")
 # a stream yt-dlp downloads before merging ("... [720p].f136.mp4"), never the result
 _PART_RE = re.compile(r"\.f[\w-]+\.\w+$")
 
-# status lines of a video download, lowercase like the rest of the UI copy
-VIDEO_TEXT = {
-    "video": "downloading video…",
-    "audio": "downloading audio…",
-    "merging": "merging…",
-}
-
 
 class YtdlpProgress:
     """Feed yt-dlp stdout lines, get UI events back.
@@ -443,13 +443,12 @@ class YtdlpProgress:
 
     def _label(self, converting=False):
         if self.playlist:
-            word = "converting" if converting else "track"
-            return f"{word} {self.index} of {self.total}"
+            return tr("st.converting_n" if converting else "st.track", n=self.index, m=self.total)
         if self.video:
             if converting:
-                return VIDEO_TEXT["merging"] if self.streams > 1 else "converting…"
-            return VIDEO_TEXT["audio"] if self.streams > 1 and self.stream >= 1 else VIDEO_TEXT["video"]
-        return "converting…" if converting else "downloading…"
+                return tr("st.merging") if self.streams > 1 else tr("st.converting")
+            return tr("st.audio") if self.streams > 1 and self.stream >= 1 else tr("st.video")
+        return tr("st.converting") if converting else tr("st.downloading")
 
     def _progress(self, message):
         percent = self._overall()
@@ -564,7 +563,7 @@ class YtdlpProgress:
         events = []
         if saved == 0 and (self.playlist or not self.failed):
             # a single track's error was already sent when it happened
-            events.append({"type": "error", "message": self.first_error or GENERIC_ERROR})
+            events.append({"type": "error", "message": self.first_error or tr(GENERIC_ERROR)})
         result = {"type": "result", "saved": saved, "failed": self.total - saved, "total": self.total}
         if self.output_path and self.paths:
             result["paths"] = list(self.paths)
@@ -573,11 +572,70 @@ class YtdlpProgress:
         return events, ok
 
 
-_GOFI_PROGRESS_RE = re.compile(r"^downloading (\d+) of (\d+)$", re.I)
+# wax-gofi speaks English. What it says is mapped to message keys here, so the
+# window shows it in its own language; the raw text stays in the log.
+_GOFI_MESSAGES = {
+    "connecting to deezer…": "st.connecting",
+    "finding tracks on deezer…": "st.finding",
+    "invalid download request": "go.bad_request",
+    "unsupported deezer quality": "go.bad_quality",
+    "use a spotify track, album, or playlist link": "go.use_spotify",
+    "could not connect to deezer. check your arl and connection.": "go.connect",
+    "no matching tracks found on deezer": "go.no_matches",
+}
+# (pattern, key, names of the groups): numbers and details are carried over
+_GOFI_PATTERNS = [
+    (re.compile(r"^downloading (\d+) of (\d+)$", re.I), "st.track", ("n", "m")),
+    (re.compile(r"^finding track (\d+) of (\d+) on deezer…$", re.I), "st.finding_n", ("n", "m")),
+    (re.compile(r"^could not find this spotify link on deezer: (.*)$", re.I | re.S), "go.link_not_found", ("detail",)),
+    (re.compile(r"^could not check spotify album: (.*)$", re.I | re.S), "go.album", ("detail",)),
+]
+_GOFI_REASONS = {
+    "already there": "why.already_there",
+    "not found on deezer": "why.not_found",
+    "spotify gave no details for this track": "why.no_details",
+    "deezer has no file for this track": "why.no_file",
+    "not available in your country": "err.country",
+    "deezer session expired, reconnect deezer": "why.session",
+    "connection lost while downloading": "why.network",
+    "deezer refused the download": "why.refused",
+    "the disk is full": "err.disk",
+    "can't write to that folder": "err.no_write",
+    "couldn't write the tags": "why.tagging",
+    "cancelled": "why.cancelled",
+    "download failed": "why.generic",
+}
+_GOFI_LICENSE_RE = re.compile(r"^not available in (.+) for this account$", re.I)
+_GOFI_TRACK_N_RE = re.compile(r"^track (\d+)$", re.I)
+# the error that means the saved Deezer session is no good
+DEEZER_CONNECT_CODE = "go.connect"
+
+
+def gofi_text(message):
+    """(text in the window's language, key or None) for something wax-gofi said."""
+    text = message.strip()
+    key = _GOFI_MESSAGES.get(text.lower())
+    if key:
+        return tr(key), key
+    for pattern, key, names in _GOFI_PATTERNS:
+        m = pattern.match(text)
+        if m:
+            return tr(key, **dict(zip(names, m.groups()))), key
+    return message.lower(), None
+
+
+def gofi_reason(reason):
+    """A per-track reason of wax-gofi in the window's language (unknown ones stay as said)."""
+    text = reason.strip()
+    key = _GOFI_REASONS.get(text.lower())
+    if key:
+        return tr(key)
+    m = _GOFI_LICENSE_RE.match(text)
+    return tr("why.license", label=m.group(1)) if m else reason
 
 
 def gofi_event(raw):
-    """Normalize a wax-gofi event to the UI's copy: lowercase, 'track N of M'."""
+    """Normalize a wax-gofi event to the UI's copy: lowercase, in the window's language."""
     try:
         event = json.loads(raw)
     except ValueError:
@@ -586,8 +644,9 @@ def gofi_event(raw):
         return None
     message = event.get("message")
     if isinstance(message, str):
-        m = _GOFI_PROGRESS_RE.match(message.strip())
-        event["message"] = f"track {m.group(1)} of {m.group(2)}" if m else message.lower()
+        event["message"], key = gofi_text(message)
+        if event.get("type") == "error" and key == DEEZER_CONNECT_CODE:
+            event["code"] = key
     return event
 
 
@@ -601,11 +660,6 @@ LOG_LINES = 400          # raw output lines kept per download (the tail)
 LOG_LINE_CHARS = 1000    # a single line longer than this is cut
 LOG_TRACKS = 500         # per-track failures / skips kept per download
 LOG_KEEP = 10            # downloads whose log is kept
-
-# every visible string the log adds, in one place for translation
-LOG_TEXT = {
-    "track_n": "track {n}",
-}
 
 HIDDEN = "[hidden]"
 _SECRET_RES = [
@@ -677,6 +731,10 @@ class DownloadLog:
         if isinstance(event.get("count"), int) and event["count"] > 0:
             entry["count"] = event["count"]
         entry.setdefault("reason", "")
+        entry["reason"] = gofi_reason(entry["reason"])
+        m = _GOFI_TRACK_N_RE.match(entry.get("title", ""))
+        if m:
+            entry["title"] = tr("log.track_n", n=m.group(1))
         target = self.skipped if event.get("status") == "skipped" else self.failures
         with self._lock:
             if len(target) < LOG_TRACKS:
@@ -701,7 +759,7 @@ class DownloadLog:
                 if err["item"] in seen or len(self.failures) >= LOG_TRACKS:
                     continue
                 seen.add(err["item"])
-                self.failures.append({"title": LOG_TEXT["track_n"].format(n=err["item"]),
+                self.failures.append({"title": tr("log.track_n", n=err["item"]),
                                       "reason": err["message"], "detail": self._clean(err["line"])})
 
     def snapshot(self):
@@ -750,6 +808,16 @@ def save_config(data):
         json.dump(data, f)
 
 
+def saved_language():
+    """The language the user picked, or None while they have not."""
+    return normalize_language(load_config().get("language"))
+
+
+def init_language():
+    """At launch: the saved choice, else the system's language (Russian or English)."""
+    set_language(saved_language() or system_language())
+
+
 # The yt-dlp a download runs is resolved per download: a user copy in the app
 # data dir that keeps itself current, or the bundled one if that is newer.
 ytdlp_manager = ytdlp_update.YtdlpManager(
@@ -758,7 +826,7 @@ ytdlp_manager = ytdlp_update.YtdlpManager(
     load_config=load_config,
     save_config=save_config,
 )
-UPDATED_MESSAGE = "updated yt-dlp — try again"
+UPDATED_MESSAGE = "err.updated"  # a key
 
 
 def pick_folder():
@@ -833,6 +901,27 @@ def status():
                     "version": APP_VERSION})
 
 
+@app.route("/language", methods=["GET", "POST"])
+def language():
+    """GET: the language the window should use. POST {language, save?}: switch it.
+
+    A choice is saved in the settings (save omitted or true); the page posts
+    save=false for the language it guessed from the system, so only a switch
+    the user made is remembered.
+    """
+    if request.method == "POST":
+        data = request.get_json(silent=True) or {}
+        code = normalize_language(data.get("language"))
+        if code is None:
+            return jsonify({"error": "unknown language"}), 400
+        set_language(code)
+        if data.get("save", True):
+            cfg = load_config()
+            cfg["language"] = code
+            save_config(cfg)
+    return jsonify({"language": get_language(), "saved": saved_language() is not None})
+
+
 @app.route("/get-folder")
 def get_folder():
     cfg = load_config()
@@ -856,7 +945,7 @@ def deezer_session():
     if request.method == "POST":
         value = (request.get_json(silent=True) or {}).get("arl", "")
         if not isinstance(value, str) or len(value.strip()) != 192:
-            return jsonify({"error": "arl must be 192 characters"}), 400
+            return jsonify({"error": tr("api.arl_length")}), 400
         deezer_arl = value.strip()
     return jsonify({"available": bool(deezer_arl)})
 
@@ -1065,20 +1154,20 @@ def download():
         used_output_dirs.add(os.path.abspath(output_path))
 
     if not url:
-        return jsonify({"error": "url is required"}), 400
+        return jsonify({"error": tr("api.url_required")}), 400
 
     if not isinstance(fmt, str) or fmt not in FORMATS:
-        return jsonify({"error": "unknown format"}), 400
+        return jsonify({"error": tr("api.unknown_format")}), 400
     is_spotify = spotify_link(url)
     if is_spotify:
         if fmt not in SPOTIFY_FORMATS:
-            return jsonify({"error": "deezer supports mp3 128k, mp3 320k and flac"}), 400
+            return jsonify({"error": tr("api.spotify_formats")}), 400
         if not find_gofi():
-            return jsonify({"error": "deezer downloader is not installed in this build"}), 503
+            return jsonify({"error": tr("api.no_gofi")}), 503
         if not deezer_arl:
-            return jsonify({"error": "connect deezer first"}), 400
+            return jsonify({"error": tr("api.connect_first")}), 400
     elif fmt in VIDEO_FORMATS and not youtube_video_link(url):
-        return jsonify({"error": "video is for youtube links only"}), 400
+        return jsonify({"error": tr("api.youtube_only")}), 400
 
     # counted from the moment it is queued: an update must not swap yt-dlp
     # between now and when the worker picks the binary for it
@@ -1185,7 +1274,7 @@ def run_download(item):
             log.tracker_failures(tracker)
             events, ok = tracker.finish(proc.returncode)
             if not ok and tracker.outdated and update_after_failure(q):
-                events.insert(-1, {"type": "error", "message": UPDATED_MESSAGE})
+                events.insert(-1, {"type": "error", "message": tr(UPDATED_MESSAGE)})
             for event in events:
                 if event.get("type") == "result" and "paths" in event:
                     event["paths"] = [p for p in event["paths"] if os.path.isfile(p)]
@@ -1227,7 +1316,7 @@ def update_after_failure(q):
     """
     if not ytdlp_manager.force_due():
         return False  # checked a moment ago, or another download is running
-    q.put("__WAX__:" + json.dumps({"type": "status", "message": "updating yt-dlp…"}))
+    q.put("__WAX__:" + json.dumps({"type": "status", "message": tr("st.updating")}))
     return ytdlp_manager.check(force=True) == "updated"
 
 
@@ -1495,8 +1584,8 @@ def schedule_round_corners(window):
         t.start()
 
 
-QUIT_TITLE = "quit wax?"
-QUIT_MESSAGE = "a download is still running. quitting will stop it."
+QUIT_TITLE = "quit.title"      # keys; asked in the window's language
+QUIT_MESSAGE = "quit.message"
 
 
 def quit_needs_confirmation(pending, confirmed=False, can_ask=True):
@@ -1590,7 +1679,7 @@ class Api:
 
         def ask():
             try:
-                ok = self.window.create_confirmation_dialog(QUIT_TITLE, QUIT_MESSAGE)
+                ok = self.window.create_confirmation_dialog(tr(QUIT_TITLE), tr(QUIT_MESSAGE))
             except Exception:
                 ok = False
             finally:
@@ -1694,12 +1783,12 @@ def _install_menu_bar(api):
         icon.setTemplate_(True)
         delegate = WaxStatusDelegate.alloc().init()
         menu = NSMenu.alloc().init()
-        for title, selector in (("Open Wax", "openWindow:"), ("Hide Wax", "hideWindow:")):
+        for title, selector in ((tr("menu.open"), "openWindow:"), (tr("menu.hide"), "hideWindow:")):
             item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(title, selector, "")
             item.setTarget_(delegate)
             menu.addItem_(item)
         menu.addItem_(NSMenuItem.separatorItem())
-        item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Quit Wax", "quitApp:", "")
+        item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(tr("menu.quit"), "quitApp:", "")
         item.setTarget_(delegate)
         menu.addItem_(item)
         status = NSStatusBar.systemStatusBar().statusItemWithLength_(NSVariableStatusItemLength)
@@ -1731,6 +1820,7 @@ def main():
     webview.settings["DRAG_REGION_DIRECT_TARGET_ONLY"] = True
     _set_dock_icon()
 
+    init_language()
     api = Api()
     api.window = webview.create_window(
         "WAX",

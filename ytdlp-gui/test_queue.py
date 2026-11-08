@@ -253,8 +253,10 @@ class QuitConfirmationTests(unittest.TestCase):
         self.assertFalse(ask(1, can_ask=False), "no window to ask in")
 
     def test_copy_is_lowercase(self):
-        for text in (wax.QUIT_TITLE, wax.QUIT_MESSAGE):
-            self.assertEqual(text, text.lower())
+        for lang in ("en", "ru"):
+            for key in (wax.QUIT_TITLE, wax.QUIT_MESSAGE):
+                text = wax.tr(key, lang)
+                self.assertEqual(text, text.lower())
 
     def api(self, answer):
         api = wax.Api()
@@ -287,7 +289,7 @@ class QuitConfirmationTests(unittest.TestCase):
             time.sleep(0.3)
         cancel_all.assert_not_called()
         api.window.destroy.assert_not_called()
-        api.window.create_confirmation_dialog.assert_called_once_with("quit wax?", wax.QUIT_MESSAGE)
+        api.window.create_confirmation_dialog.assert_called_once_with("quit wax?", wax.tr(wax.QUIT_MESSAGE))
 
     def test_confirmed_quit_stops_and_closes(self):
         api, asked = self.api(True)
