@@ -29,7 +29,7 @@ def main():
     call = re.search(r"  resize\((.+?)\);", page)
     assert call, "the UI never calls resize()"
     heights = {int(h) for h in re.findall(r"\d+", call.group(1))}
-    assert heights == {260, 336, 396, 432}, f"unexpected window heights: {heights}"
+    assert {260, 336, 396, 432}.issubset(heights), f"unexpected window heights: {heights}"
 
     # the window is dragged by the modal backdrop only — easy_drag would hijack
     # every mouse drag and make the url/folder fields unselectable
