@@ -1,3 +1,4 @@
+import itertools
 import json
 import os
 import queue
@@ -125,9 +126,11 @@ TEMP_DIR = os.path.join(tempfile.gettempdir(), "wax-digger-temp")
 
 app = Flask(__name__, template_folder=os.path.join(RES, "templates"))
 
-download_queue = queue.Queue()
 history = []
 active_streams = {}
+_stream_ids = itertools.count(1)
+# A stream nobody reads is dropped this long after its download ends.
+STREAM_TTL = 60
 active_procs = set()
 
 FORMATS = {
@@ -184,21 +187,21 @@ def pick_folder():
         return ""
 
 
-# Allow the Chrome/Firefox extension (popup + injected content script) to call the
-# local server cross-origin. Extension contexts report an "Origin" like
-# chrome-extension://<id>, so we echo it back when it matches.
-ALLOWED_ORIGIN_PREFIXES = ("chrome-extension://", "moz-extension://")
+# The server only ever talks to its own window. A page in the user's browser
+# can still reach 127.0.0.1 (directly, or via DNS rebinding under its own
+# hostname), so requests with a foreign Host or Origin are refused outright.
+ALLOWED_HOSTS = {HOST, f"{HOST}:{PORT}", "localhost", f"localhost:{PORT}"}
+ALLOWED_ORIGINS = {URL, f"http://localhost:{PORT}"}
 
 
-@app.after_request
-def add_cors_headers(resp):
-    origin = request.headers.get("Origin", "")
-    if origin.startswith(ALLOWED_ORIGIN_PREFIXES):
-        resp.headers["Access-Control-Allow-Origin"] = origin
-        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-        resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
-        resp.headers["Vary"] = "Origin"
-    return resp
+@app.before_request
+def only_local_window():
+    if request.host not in ALLOWED_HOSTS:
+        return jsonify({"error": "Host not allowed"}), 403
+    origin = request.headers.get("Origin")
+    if origin is not None and origin not in ALLOWED_ORIGINS:
+        return jsonify({"error": "Origin not allowed"}), 403
+    return None
 
 
 @app.route("/")
@@ -242,10 +245,6 @@ def choose_folder():
 @app.route("/deezer-session", methods=["GET", "POST"])
 def deezer_session():
     global deezer_arl
-    # This endpoint accepts secrets only from Wax itself, not browser extensions.
-    origin = request.headers.get("Origin")
-    if origin and origin != URL:
-        return jsonify({"error": "Origin not allowed"}), 403
     if request.method == "POST":
         value = (request.get_json(silent=True) or {}).get("arl", "")
         if not isinstance(value, str) or len(value.strip()) != 192:
@@ -291,9 +290,10 @@ def download():
     cmd.append(url)
 
     q = queue.Queue()
-    active_streams[id(q)] = q
+    stream_id = next(_stream_ids)
+    active_streams[stream_id] = q
 
-    entry = {"id": id(q), "url": url, "format": fmt, "status": "downloading", "filename": ""}
+    entry = {"id": stream_id, "url": url, "format": fmt, "status": "downloading", "filename": ""}
     history.insert(0, entry)
     if len(history) > 10:
         history.pop()
@@ -352,9 +352,13 @@ def download():
             if is_spotify and workdir:
                 workdir.cleanup()
             q.put(f"__DONE__:{status}")
+            # if the window never subscribed (or dropped off), do not keep it forever
+            reaper = threading.Timer(STREAM_TTL, active_streams.pop, (stream_id, None))
+            reaper.daemon = True  # must not hold the app open on quit
+            reaper.start()
 
     threading.Thread(target=run, daemon=True).start()
-    return jsonify({"stream_id": id(q)})
+    return jsonify({"stream_id": stream_id})
 
 
 @app.route("/progress/<int:stream_id>")
