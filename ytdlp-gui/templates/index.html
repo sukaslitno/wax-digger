@@ -110,6 +110,8 @@ html, body {
 }
 .input input::placeholder { color: rgba(255, 255, 255, .48); }
 .input__chip { height: 48px; }
+/* two chips side by side keep the 4px gap of buttons in a row (folder, info) */
+.input__chip--lead { margin-right: -12px; }
 
 .input[data-state="error"]::before {
   background: radial-gradient(ellipse 50% 50% at 50% 50%, #000 0%, var(--red) 100%);
@@ -236,6 +238,7 @@ html, body {
         </svg>
       </span>
       <input id="url" type="text" placeholder="paste a track / album / playlist link" autocomplete="off" spellcheck="false">
+      <button type="button" class="btn btn--white input__chip input__chip--lead" id="modeChip" hidden>audio</button>
       <button type="button" class="btn btn--white input__chip" id="fmtChip">mp3 128k</button>
     </label>
 
@@ -354,8 +357,10 @@ const ICON_CLOSE = `<svg viewBox="0 0 24 24" fill="none">
   <path d="M14.5 9.5L9.5 14.5M9.5 9.5L14.5 14.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
 </svg>`;
 
-// Every string the details screen adds, in one place for translation.
+// Every string the details screen and the audio / video chip add, in one place for translation.
 const T = {
+  audio: "audio",
+  video: "video",
   details: " · details",
   copy: "copy",
   copied: "copied",
@@ -375,12 +380,23 @@ const FORMATS = [
   ["wav", "wav"],
   ["aac", "aac"],
 ];
+// YouTube links can be saved as video instead: the quality is a cap, lowest first
+const VIDEO_FORMATS = [
+  ["video_360", "360p"],
+  ["video_480", "480p"],
+  ["video_720", "720p"],
+  ["video_1080", "1080p"],
+  ["video_1440", "1440p"],
+  ["video_2160", "2160p"],
+];
 
 const el = (id) => document.getElementById(id);
 const urlEl = el("url"), folderEl = el("folder"), actionBtn = el("actionBtn");
 const progressEl = el("progress"), urlInput = el("urlInput");
 
 let fmtIndex = 1;  // mp3 320k
+let videoMode = false;   // the audio / video chip; only YouTube links show it
+let videoIndex = 3;      // 1080p: the best that is still H.264, which plays everywhere
 let phase = "idle";      // idle | busy | done | cancelled | error
 let info = false;
 let details = false;     // the details screen of the last failed download(s)
@@ -408,7 +424,17 @@ function isSpotify(value) {
   return /^(?:open|www\.open)\.spotify\.com$/.test(hostOf(value.trim()) || "");
 }
 
+// youtube.com (shorts too) and youtu.be; music.youtube.com stays audio-only
+function isYouTubeVideo(value) {
+  return /^(?:youtube\.com|m\.youtube\.com|youtu\.be)$/.test(hostOf(value.trim()) || "");
+}
+
+function videoChosen() { return videoMode && isYouTubeVideo(urlEl.value); }
+
 function availableFormats() { return isSpotify(urlEl.value) ? FORMATS.slice(0, 3) : FORMATS; }
+
+// [backend key, chip label] of what the chips are set to for the link in the field
+function chosenFormat() { return videoChosen() ? VIDEO_FORMATS[videoIndex] : FORMATS[fmtIndex]; }
 
 // Returns the bridge call's promise, or null when running in a plain browser.
 function api(name, ...args) {
@@ -450,7 +476,9 @@ function render() {
   // the filled screen stays while anything runs, even with the field emptied
   const filled = hasUrl || phase !== "idle";
   if (spotify && fmtIndex > 2) fmtIndex = 0;
-  el("fmtChip").textContent = FORMATS[fmtIndex][1];
+  el("modeChip").hidden = !isYouTubeVideo(urlEl.value);
+  el("modeChip").textContent = videoMode ? T.video : T.audio;
+  el("fmtChip").textContent = chosenFormat()[1];
 
   if (details && !hasDetails()) details = false;
   const screen = info || details;  // a screen over the main one, closed by the corner (x)
@@ -474,6 +502,7 @@ function render() {
   // the running download until a new link is typed, then to that one
   const locked = action === "cancel" || phase === "cancelled";
   el("fmtChip").classList.toggle("locked", locked);
+  el("modeChip").classList.toggle("locked", locked);
   el("folderRow").classList.toggle("locked", locked);
   // pointer-events alone still leaves the focused field typeable
   folderEl.readOnly = locked;
@@ -511,11 +540,18 @@ function setProgress(pct) {
   progressEl.style.setProperty("--p", Math.max(0, Math.min(100, pct)));
 }
 
-// ===== format chip =====
+// ===== format chips =====
 el("fmtChip").addEventListener("click", () => {
   edited();
-  fmtIndex = (fmtIndex + 1) % availableFormats().length;
-  el("fmtChip").textContent = FORMATS[fmtIndex][1];
+  if (videoChosen()) videoIndex = (videoIndex + 1) % VIDEO_FORMATS.length;
+  else fmtIndex = (fmtIndex + 1) % availableFormats().length;
+  el("fmtChip").textContent = chosenFormat()[1];
+});
+// audio / video: each keeps its own choice, so switching back loses nothing
+el("modeChip").addEventListener("click", () => {
+  edited();
+  videoMode = !videoMode;
+  render();
 });
 
 // ===== folder =====
@@ -587,7 +623,7 @@ async function enqueue() {
     const r = await fetch("/download", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url, format: FORMATS[fmtIndex][0], output_path: folderEl.value.trim() }),
+      body: JSON.stringify({ url, format: chosenFormat()[0], output_path: folderEl.value.trim() }),
     });
     ({ stream_id, error } = await r.json());
   } catch (e) { error = String(e); }

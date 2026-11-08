@@ -228,5 +228,16 @@ class DownloadValidationTests(unittest.TestCase):
         self.assertEqual(submit.call_args[0][0].fmt, "mp3_320")
 
 
+class PageTests(unittest.TestCase):
+    def test_chips(self):
+        page = wax.app.test_client().get("/").get_data(as_text=True)
+        # the audio / video chip is the same in-field chip as the format one
+        self.assertIn('class="btn btn--white input__chip input__chip--lead" id="modeChip" hidden', page)
+        offered = re.findall(r'\["(video_\d+)", "(\d+p)"\]', page)
+        self.assertEqual(offered, [(f, f"{h}p") for f, h in wax.VIDEO_FORMATS.items()])
+        self.assertIn('audio: "audio"', page)
+        self.assertIn('video: "video"', page)
+
+
 if __name__ == "__main__":
     unittest.main()
