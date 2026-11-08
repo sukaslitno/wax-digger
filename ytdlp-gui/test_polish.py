@@ -179,7 +179,7 @@ class PageTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         out = json.loads(r.stdout)
         self.assertEqual(out["apple"], "apple music is drm-locked — try bandcamp, youtube or spotify")
-        self.assertEqual(out["appleRu"], "apple music под drm — попробуй bandcamp, youtube или spotify")
+        self.assertEqual(out["appleRu"], "apple music под drm — бери с bandcamp, youtube или spotify")
         self.assertEqual(out["amazon"], "amazon music")
         self.assertEqual(out["deezer"], "deezer")
         self.assertEqual(out["fine"], ["", ""])

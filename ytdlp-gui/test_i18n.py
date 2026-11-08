@@ -296,10 +296,10 @@ class LanguageTests(unittest.TestCase):
         ev = lambda raw: wax.gofi_event(json.dumps(raw))
         self.assertEqual(ev({"type": "progress", "message": "downloading 2 of 9", "percent": 1})["message"], "трек 2 из 9")
         self.assertEqual(ev({"type": "status", "message": "finding track 4 of 9 on deezer…"})["message"],
-                         "ищу трек 4 из 9 на deezer…")
+                         "ищу на deezer: 4 из 9…")
         err = ev({"type": "error", "message": "could not connect to deezer. check your arl and connection."})
         self.assertEqual(err["code"], "go.connect")
-        self.assertIn("не удалось подключиться", err["message"])
+        self.assertIn("не достучался до deezer", err["message"])
         self.assertEqual(ev({"type": "error", "message": "could not find this spotify link on deezer: 404"})["message"],
                          "не нашёл эту ссылку spotify на deezer: 404")
         self.assertEqual(ev({"type": "status", "message": "Something New"})["message"], "something new")
