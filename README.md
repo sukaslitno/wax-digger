@@ -19,6 +19,14 @@ Grab the files for your platform from the **[Releases](../../releases)** page:
 The desktop app bundles everything — no Python, yt-dlp, or ffmpeg to install.
 Run it — the WAX window opens on your desktop.
 
+yt-dlp keeps itself up to date without a new app release: Wax copies the
+bundled yt-dlp into the user data dir (macOS `~/Library/Application
+Support/Wax Digger/bin`, Windows `%LOCALAPPDATA%\Wax Digger\bin`, Linux
+`~/.local/share/wax-digger/bin`) and runs yt-dlp's own updater on it about once
+a day, never during a download, and right away when a download fails the way an
+outdated extractor does. Each download uses the newer of that copy and the
+bundled one; a broken update is never switched to.
+
 Spotify track, album and public playlist links use the bundled GoFi downloader
 to find matching tracks on Deezer. A Deezer session (ARL) is required. Wax
 accepts an ARL in the app for the current launch; it is not saved by Wax. In a
