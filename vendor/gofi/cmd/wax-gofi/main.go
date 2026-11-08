@@ -24,34 +24,35 @@ func fail(message string)       { emit(map[string]any{"type": "error", "message"
 func main() {
 	var in input
 	if err := json.NewDecoder(os.Stdin).Decode(&in); err != nil {
-		fail("Invalid download request")
+		fail("invalid download request")
 	}
 	if _, _, _, err := dfi.ParseQualityStrict(in.Quality); err != nil {
-		fail("Unsupported Deezer quality")
+		fail("unsupported deezer quality")
 	}
 	parts, err := converter.GetURLParts(in.URL)
 	if err != nil || (parts.Type != "spotify-track" && parts.Type != "spotify-album" && parts.Type != "spotify-playlist") {
-		fail("Use a Spotify track, album, or playlist link")
+		fail("use a spotify track, album, or playlist link")
 		return
 	}
-	emit(map[string]any{"type": "status", "message": "Connecting to Deezer…"})
+	emit(map[string]any{"type": "status", "message": "connecting to deezer…"})
 	if _, err = request.InitDeezerAPI(in.ARL); err != nil {
-		fail("Could not connect to Deezer. Check your ARL and connection.")
+		fail("could not connect to deezer. check your arl and connection.")
 	}
 	user, err := api.GetUser()
 	if err != nil || user.UserID == "" || user.UserID == "0" {
-		fail("Could not connect to Deezer. Check your ARL and connection.")
+		fail("could not connect to deezer. check your arl and connection.")
 	}
-	emit(map[string]any{"type": "status", "message": "Finding tracks on Deezer…"})
+	emit(map[string]any{"type": "status", "message": "finding tracks on deezer…"})
 	result, err := converter.ParseInfo(in.URL)
 	expected := 0
 	usedEmbed := false
+	var missing []missingTrack
 	if err != nil && (parts.Type == "spotify-track" || parts.Type == "spotify-album") {
-		result, expected, err = resolveEmbed(parts)
+		result, expected, missing, err = resolveEmbed(parts)
 		usedEmbed = true
 	}
 	if err != nil {
-		fail("Could not find this Spotify link on Deezer: " + err.Error())
+		fail("could not find this spotify link on deezer: " + detail(err))
 	}
 	if expected == 0 {
 		expected = len(result.Tracks)
@@ -68,23 +69,25 @@ func main() {
 		if e == nil {
 			expected = a.TotalTracks
 		} else if !usedEmbed {
-			result, expected, err = resolveEmbed(parts)
+			result, expected, missing, err = resolveEmbed(parts)
+			usedEmbed = true
 			if err != nil {
-				fail("Could not check Spotify album: " + err.Error())
+				fail("could not check spotify album: " + detail(err))
 			}
 		}
 	}
+	reportMissing(parts.Type, usedEmbed, result.Tracks, missing, expected)
 	if expected == 0 || len(result.Tracks) == 0 {
-		fail("No matching tracks found on Deezer")
+		fail("no matching tracks found on deezer")
 	}
-	saved := 0
+	saved, skipped := 0, 0
 	failed := expected - len(result.Tracks)
 	if failed < 0 {
 		failed = 0
 	}
 	covers := dfi.CoverSizes{MP3_128: 500, MP3_320: 500, FLAC: 1000}
 	for i, track := range result.Tracks {
-		emit(map[string]any{"type": "progress", "message": fmt.Sprintf("Downloading %d of %d", i+1, len(result.Tracks)), "percent": float64(i) * 100 / float64(len(result.Tracks))})
+		emit(map[string]any{"type": "progress", "message": fmt.Sprintf("downloading %d of %d", i+1, len(result.Tracks)), "percent": float64(i) * 100 / float64(len(result.Tracks))})
 		template := filepath.Join(in.Output, "{ART_NAME} - {SNG_TITLE} ["+in.Quality+"]")
 		if parts.Type != "spotify-track" {
 			position := i + 1
@@ -99,7 +102,10 @@ func main() {
 		_, ext, _, _ := dfi.ParseQualityStrict(in.Quality)
 		target := dfi.SaveLayout(track, result.LinkInfo, template, false, len(result.Tracks)) + ext
 		if _, err := os.Stat(target); err == nil {
-			failed++
+			// the file from an earlier run is kept: it counts as saved
+			emit(trackEvent("skipped", track.ART_NAME, track.SNG_TITLE, reasonAlreadyThere, ""))
+			skipped++
+			saved++
 			continue
 		}
 		path, err := dfi.DownloadTrack(context.Background(), dfi.DownloadTrackOptions{
@@ -108,13 +114,43 @@ func main() {
 			CoverSizes: covers, CoverMode: metadata.CoverModeEmbed,
 		})
 		if err != nil || path == "" {
+			emit(trackEvent("failed", track.ART_NAME, track.SNG_TITLE, failureReason(err, in.Quality), detail(err)))
 			failed++
 			continue
 		}
 		saved++
 	}
-	emit(map[string]any{"type": "result", "saved": saved, "failed": failed, "total": expected})
+	// saved includes skipped; skipped is extra detail for the log
+	emit(map[string]any{"type": "result", "saved": saved, "failed": failed, "total": expected, "skipped": skipped})
 	if failed > 0 || saved != expected {
 		os.Exit(1)
 	}
+}
+
+// reportMissing names the Spotify tracks that found no match on Deezer: by
+// artist and title when the embed told us, by position on a playlist, or as
+// a count when only the totals differ.
+func reportMissing(kind string, usedEmbed bool, tracks []types.TrackType, missing []missingTrack, expected int) {
+	if usedEmbed {
+		for _, m := range missing {
+			emit(trackEvent("failed", m.Artist, m.Title, m.Reason, ""))
+		}
+		return
+	}
+	count := expected - len(tracks)
+	if count <= 0 {
+		return
+	}
+	if kind == "spotify-playlist" {
+		positions := missingPositions(tracks, expected)
+		if len(positions) == count {
+			for _, p := range positions {
+				emit(trackEvent("failed", "", fmt.Sprintf("track %d", p), reasonNotFound, ""))
+			}
+			return
+		}
+	}
+	event := trackEvent("failed", "", "", reasonNotFound, "")
+	event["count"] = count
+	emit(event)
 }
