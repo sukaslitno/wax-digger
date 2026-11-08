@@ -1,5 +1,5 @@
 # build_windows.ps1 — build a portable WaxDigger.exe (single file).
-# Run on Windows with: pip install pyinstaller pillow flask
+# Run on Windows with: pip install pyinstaller pillow flask pywebview
 $ErrorActionPreference = "Stop"
 $env:PYTHONUTF8 = "1"          # avoid cp1252 crashes on unicode output
 $env:PYTHONIOENCODING = "utf-8"
@@ -29,6 +29,7 @@ Invoke-Checked {
   pyinstaller --noconfirm --onefile --windowed --name "WaxDigger" `
     --icon packaging\icon.ico `
     --add-data "ytdlp-gui\templates;templates" `
+    --collect-all webview `
     @binArgs `
     ytdlp-gui\app.py
 }

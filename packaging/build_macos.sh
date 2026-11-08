@@ -1,6 +1,6 @@
 #!/bin/bash
 # build_macos.sh — build "Wax Digger.app" and package it into WaxDigger.dmg.
-# Run on macOS with: pip install pyinstaller pillow
+# Run on macOS with: pip install pyinstaller pillow flask pywebview
 set -e
 
 cd "$(dirname "$0")/.."   # repo root
@@ -21,6 +21,8 @@ pyinstaller --noconfirm --windowed --name "$APP" \
   --icon packaging/icon.icns \
   --osx-bundle-identifier io.github.sukaslitno.waxdigger \
   --add-data "ytdlp-gui/templates:templates" \
+  --add-data "packaging/app_icon.png:." \
+  --collect-all webview \
   "${BIN_ARGS[@]}" \
   ytdlp-gui/app.py
 

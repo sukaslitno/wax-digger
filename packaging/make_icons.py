@@ -12,7 +12,7 @@ import os
 import shutil
 import subprocess
 
-from PIL import Image
+from PIL import Image, ImageChops, ImageDraw
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -22,17 +22,37 @@ ICNS_SIZES = [16, 32, 64, 128, 256, 512, 1024]
 # Sizes baked into the Windows .ico
 ICO_SIZES = [256, 128, 64, 48, 32, 16]
 
+# macOS icon grid: the artwork is an inset rounded square, not a full-bleed one,
+# so the icon lines up with every other icon in the dock.
+MAC_CANVAS = 1024
+MAC_SHAPE = 824
+MAC_RADIUS = 185
+
 
 def make_square(img: Image.Image, size: int = 1024) -> Image.Image:
-    """Fit img into a square canvas with white background, then resize."""
-    canvas = Image.new("RGBA", (max(img.width, img.height),) * 2, (255, 255, 255, 255))
-    off_x = (canvas.width - img.width) // 2
-    off_y = (canvas.height - img.height) // 2
-    if img.mode == "RGBA":
-        canvas.paste(img, (off_x, off_y), img)
-    else:
-        canvas.paste(img, (off_x, off_y))
+    """Fit img into a transparent square canvas, then resize."""
+    side = max(img.width, img.height)
+    canvas = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+    img = img.convert("RGBA")
+    canvas.paste(img, ((side - img.width) // 2, (side - img.height) // 2), img)
     return canvas.resize((size, size), Image.LANCZOS)
+
+
+def rounded_macos(base: Image.Image) -> Image.Image:
+    """Inset the artwork and round its corners the way macOS icons are drawn."""
+    art = base.resize((MAC_SHAPE,) * 2, Image.LANCZOS)
+
+    ss = 4  # draw the mask oversized so the corners downscale smooth
+    mask = Image.new("L", (MAC_SHAPE * ss,) * 2, 0)
+    ImageDraw.Draw(mask).rounded_rectangle(
+        [0, 0, MAC_SHAPE * ss - 1, MAC_SHAPE * ss - 1], radius=MAC_RADIUS * ss, fill=255
+    )
+    art.putalpha(ImageChops.multiply(art.getchannel("A"), mask.resize((MAC_SHAPE,) * 2, Image.LANCZOS)))
+
+    canvas = Image.new("RGBA", (MAC_CANVAS,) * 2, (0, 0, 0, 0))
+    off = (MAC_CANVAS - MAC_SHAPE) // 2
+    canvas.paste(art, (off, off), art)
+    return canvas
 
 
 def build_icns(base: Image.Image, out_path: str) -> bool:
@@ -71,10 +91,11 @@ def main():
     src = os.path.join(HERE, "icon_source.png")
     img = Image.open(src)
 
-    base = make_square(img, 1024)
+    base = make_square(img, 1024)   # full bleed — Windows icons are square
+    mac = rounded_macos(base)       # inset + rounded — macOS dock and Finder
 
     png = os.path.join(HERE, "app_icon.png")
-    base.save(png)
+    mac.save(png)
     print(f"wrote {os.path.relpath(png, HERE)}")
 
     ico = os.path.join(HERE, "icon.ico")
@@ -82,7 +103,7 @@ def main():
     print(f"wrote {os.path.relpath(ico, HERE)}")
 
     icns = os.path.join(HERE, "icon.icns")
-    if build_icns(base, icns):
+    if build_icns(mac, icns):
         print(f"wrote {os.path.relpath(icns, HERE)} (via iconutil)")
     else:
         try:
