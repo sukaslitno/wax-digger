@@ -1,9 +1,11 @@
+import collections
 import itertools
 import json
 import os
 import queue
 import re
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -200,7 +202,7 @@ SQUARE_COVER = 'ThumbnailsConvertor+ffmpeg_o:-vf "crop=min(iw\\,ih):min(iw\\,ih)
 COVER_FORMATS = {"mp3_128", "mp3_320", "flac", "aac"}
 
 
-def build_ytdlp_command(url, fmt, output_path, ytdlp=None, ffmpeg_location=None):
+def build_ytdlp_command(url, fmt, output_path, ytdlp=None, ffmpeg_location=None, temp_dir=None):
     fmt = fmt if fmt in FORMATS else "mp3_320"
     cmd = list(ytdlp if ytdlp is not None else ytdlp_manager.current()) + FORMATS[fmt] + [
         # one download pass (no separate video+audio + merge), one progress ramp
@@ -212,7 +214,9 @@ def build_ytdlp_command(url, fmt, output_path, ytdlp=None, ffmpeg_location=None)
         "--no-abort-on-error",   # a dead track in a playlist skips, the rest still downloads
         "-o", OUTPUT_TEMPLATE,
         "-P", output_path,
-        "-P", f"temp:{TEMP_DIR}",
+        # each run gets its own temp dir, so a cancelled run's partial files
+        # can be removed without touching anything else
+        "-P", f"temp:{temp_dir or TEMP_DIR}",
         "--embed-metadata",
     ]
     for rule in NAMING_RULES + TAG_RULES:
@@ -528,6 +532,197 @@ def deezer_session():
     return jsonify({"available": bool(deezer_arl)})
 
 
+# ---------------------------------------------------------------------------
+# Child processes. yt-dlp spawns ffmpeg (and the standalone yt-dlp.exe is a
+# PyInstaller bootloader with a child of its own), so stopping a download means
+# stopping a whole process tree, not one pid.
+# ---------------------------------------------------------------------------
+CREATE_NO_WINDOW = 0x08000000
+
+
+def child_popen_kwargs():
+    if IS_WINDOWS:
+        return {"creationflags": CREATE_NO_WINDOW}  # no console window
+    # its own session = its own process group, killed as one
+    return {"start_new_session": True}
+
+
+def kill_tree(proc, grace=3.0):
+    """Stop a child and everything it started. Blocks until it is gone (or gave up)."""
+    if proc is None or proc.poll() is not None:
+        return
+    if IS_WINDOWS:
+        # terminate() only ends the top process; ffmpeg would keep running
+        try:
+            subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                           capture_output=True, timeout=10, creationflags=CREATE_NO_WINDOW)
+        except Exception:
+            pass
+        try:
+            proc.wait(grace)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+        return
+    try:
+        group = os.getpgid(proc.pid) == proc.pid
+    except OSError:
+        group = False
+    try:
+        if group:
+            os.killpg(proc.pid, signal.SIGTERM)
+        else:
+            proc.terminate()
+    except OSError:
+        pass
+    try:
+        proc.wait(grace)
+    except subprocess.TimeoutExpired:
+        pass
+    # whatever is left of the group (ffmpeg outliving yt-dlp, or a stuck child)
+    try:
+        if group:
+            os.killpg(proc.pid, signal.SIGKILL)
+        elif proc.poll() is None:
+            proc.kill()
+    except OSError:
+        pass
+    try:
+        proc.wait(grace)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Downloads run one at a time, in the order they were added, on one worker
+# thread in the server. The queue lives here and not in the page, so it keeps
+# going while the window is hidden in the menu bar. Each link keeps its own
+# stream id: its events wait in its own queue until the window reads them.
+# A stream ends with __DONE__:done | error | cancelled.
+# ---------------------------------------------------------------------------
+class Download:
+    def __init__(self, stream_id, url, fmt, output_path, is_spotify):
+        self.id = stream_id
+        self.url = url
+        self.fmt = fmt
+        self.output_path = output_path
+        self.is_spotify = is_spotify
+        self.events = queue.Queue()
+        self.state = "queued"           # queued | running | done | error | cancelled
+        self.cancelled = False
+        self.proc = None
+        self.temp_dir = os.path.join(TEMP_DIR, f"run-{stream_id}")
+        self.entry = {"id": stream_id, "url": url, "format": fmt, "status": "queued", "filename": ""}
+        self._counted = True            # begin_download() was called for it
+
+    def emit(self, event):
+        self.events.put("__WAX__:" + json.dumps(event))
+
+    def release(self):
+        """Stop counting it as a download in progress (once)."""
+        if self._counted:
+            self._counted = False
+            ytdlp_manager.end_download()
+
+    def close(self, status):
+        self.state = status
+        self.entry["status"] = status
+        self.release()
+        self.events.put(f"__DONE__:{status}")
+        # if the window never subscribed (or dropped off), do not keep it forever
+        reaper = threading.Timer(STREAM_TTL, active_streams.pop, (self.id, None))
+        reaper.daemon = True  # must not hold the app open on quit
+        reaper.start()
+
+    def remove_partials(self):
+        # finished files are already moved into the output folder; only the
+        # half-written ones of this run live here
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+
+class DownloadQueue:
+    def __init__(self, runner):
+        self._runner = runner
+        self._cond = threading.Condition()
+        self._pending = collections.deque()
+        self._items = {}
+        self._current = None
+        self._worker = None
+
+    def submit(self, item):
+        with self._cond:
+            self._items[item.id] = item
+            self._pending.append(item)
+            if self._worker is None or not self._worker.is_alive():
+                self._worker = threading.Thread(target=self._work, daemon=True, name="wax-downloads")
+                self._worker.start()
+            self._cond.notify()
+            return len(self._pending) - 1 + (self._current is not None)
+
+    def _work(self):
+        while True:
+            with self._cond:
+                while not self._pending:
+                    self._cond.wait()
+                item = self._pending.popleft()
+                item.state = "running"
+                self._current = item
+            try:
+                self._runner(item)
+            except Exception:
+                pass  # the runner reports its own errors; the queue must go on
+            finally:
+                with self._cond:
+                    self._current = None
+                    self._items.pop(item.id, None)
+
+    def started(self, item, proc):
+        """The runner spawned item's process. False if it was cancelled meanwhile."""
+        with self._cond:
+            item.proc = proc
+            cancelled = item.cancelled
+        if cancelled:
+            kill_tree(proc)
+        return not cancelled
+
+    def cancel(self, stream_id):
+        """Cancel a queued or running download. False if there is none by that id."""
+        with self._cond:
+            item = self._items.get(stream_id)
+            if item is None or item.cancelled or item.state not in ("queued", "running"):
+                return False
+            item.cancelled = True
+            waiting = item.state == "queued"
+            if waiting:
+                self._pending.remove(item)
+                self._items.pop(item.id, None)
+            proc = item.proc
+        if waiting:
+            item.close("cancelled")
+        else:
+            kill_tree(proc)        # the runner then ends the stream as cancelled
+            item.remove_partials()  # also here: on quit the runner may not get to it
+        return True
+
+    def cancel_all(self):
+        with self._cond:
+            ids = [i.id for i in self._pending] + ([self._current.id] if self._current else [])
+        for stream_id in reversed(ids):  # queued first, so nothing new starts
+            self.cancel(stream_id)
+
+    def pending(self):
+        """Downloads running or waiting to run."""
+        with self._cond:
+            cur = self._current
+            return len(self._pending) + (cur is not None and cur.state == "running" and not cur.cancelled)
+
+    def order(self):
+        with self._cond:
+            return ([self._current.id] if self._current else []) + [i.id for i in self._pending]
+
+
 @app.route("/download", methods=["POST"])
 def download():
     data = request.json
@@ -543,113 +738,121 @@ def download():
     if is_spotify:
         if fmt not in ("mp3_128", "mp3_320", "flac"):
             return jsonify({"error": "Deezer supports MP3 128, MP3 320 and FLAC"}), 400
-        gofi = find_gofi()
-        if not gofi:
+        if not find_gofi():
             return jsonify({"error": "Deezer downloader is not installed in this build"}), 503
         if not deezer_arl:
             return jsonify({"error": "Connect Deezer first"}), 400
 
-    os.makedirs(TEMP_DIR, exist_ok=True)
-    # counted before the binary is picked, so an update can't swap it underneath
+    # counted from the moment it is queued: an update must not swap yt-dlp
+    # between now and when the worker picks the binary for it
     ytdlp_manager.begin_download()
-    try:
-        cmd = None if is_spotify else build_ytdlp_command(url, fmt, output_path,
-                                                          ffmpeg_location=FFMPEG_LOCATION)
-    except Exception:
-        ytdlp_manager.end_download()
-        raise
-
-    q = queue.Queue()
     stream_id = next(_stream_ids)
-    active_streams[stream_id] = q
-
-    entry = {"id": stream_id, "url": url, "format": fmt, "status": "downloading", "filename": ""}
-    history.insert(0, entry)
+    item = Download(stream_id, url, fmt, output_path, is_spotify)
+    active_streams[stream_id] = item.events
+    history.insert(0, item.entry)
     if len(history) > 10:
         history.pop()
+    ahead = downloads.submit(item)
+    return jsonify({"stream_id": stream_id, "ahead": ahead})
 
-    def run():
-        proc = None
-        workdir = None
-        running = True
 
-        def finished():
-            nonlocal running
-            if running:
-                running = False
-                ytdlp_manager.end_download()
+@app.route("/cancel/<int:stream_id>", methods=["POST"])
+def cancel(stream_id):
+    return jsonify({"cancelled": downloads.cancel(stream_id)})
 
-        try:
-            kwargs = {}
-            if IS_WINDOWS:
-                # don't pop a console window for the child process
-                kwargs["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
-            workdir = tempfile.TemporaryDirectory(prefix="wax-gofi-") if is_spotify else None
-            child_cmd = [gofi] if is_spotify else cmd
-            proc = subprocess.Popen(
-                child_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                stdin=subprocess.PIPE if is_spotify else None,
-                cwd=workdir.name if workdir else None,
-                text=True,
-                errors="replace",  # a stray non-UTF-8 byte must not kill the reader
-                bufsize=1,
-                **kwargs,
-            )
-            active_procs.add(proc)
-            if is_spotify:
-                payload = {"url": url if "://" in url else "https://" + url,
-                           "quality": {"mp3_128": "128", "mp3_320": "320", "flac": "flac"}[fmt],
-                           "output": os.path.abspath(output_path), "arl": deezer_arl}
-                json.dump(payload, proc.stdin)
-                proc.stdin.close()
-            tracker = None if is_spotify else YtdlpProgress()
-            for line in proc.stdout:
-                line = line.rstrip()
-                if is_spotify:
-                    if line.startswith("WAX_EVENT:"):
-                        event = gofi_event(line[len("WAX_EVENT:"):])
-                        if event is not None:
-                            q.put("__WAX__:" + json.dumps(event))
-                    continue
-                for event in tracker.feed(line):
-                    q.put("__WAX__:" + json.dumps(event))
-                if "Destination:" in line:
-                    entry["filename"] = os.path.basename(line.split("Destination:", 1)[1].strip())
-                elif "has already been downloaded" in line:
-                    fname = line.split("]", 1)[-1].strip().split(" has already")[0].strip()
-                    if fname:
-                        entry["filename"] = os.path.basename(fname)
-            proc.wait()
-            active_procs.discard(proc)
-            finished()
-            ok = proc.returncode == 0
-            if tracker is not None:
-                events, ok = tracker.finish(proc.returncode)
-                if not ok and tracker.outdated and update_after_failure(q):
-                    events.insert(-1, {"type": "error", "message": UPDATED_MESSAGE})
-                for event in events:
-                    q.put("__WAX__:" + json.dumps(event))
-            status = "done" if ok else "error"
-            entry["status"] = status
-        except Exception as e:
-            status = "error"
-            entry["status"] = status
+
+def run_download(item):
+    """Run one queued download to the end, reporting into its stream."""
+    q = item.events
+    entry = item.entry
+    proc = None
+    workdir = None
+    status = "error"
+    entry["status"] = "downloading"
+    try:
+        os.makedirs(item.temp_dir, exist_ok=True)
+        gofi = find_gofi() if item.is_spotify else None
+        if item.is_spotify:
+            if not gofi:
+                raise RuntimeError("Deezer downloader is not installed in this build")
+            workdir = tempfile.TemporaryDirectory(prefix="wax-gofi-")
+            child_cmd = [gofi]
+        else:
+            child_cmd = build_ytdlp_command(item.url, item.fmt, item.output_path,
+                                            ffmpeg_location=FFMPEG_LOCATION, temp_dir=item.temp_dir)
+        if item.cancelled:
+            raise _Cancelled()
+        proc = subprocess.Popen(
+            child_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.PIPE if item.is_spotify else None,
+            cwd=workdir.name if workdir else None,
+            text=True,
+            errors="replace",  # a stray non-UTF-8 byte must not kill the reader
+            bufsize=1,
+            **child_popen_kwargs(),
+        )
+        active_procs.add(proc)
+        if not downloads.started(item, proc):
+            raise _Cancelled()
+        if item.is_spotify:
+            payload = {"url": item.url if "://" in item.url else "https://" + item.url,
+                       "quality": {"mp3_128": "128", "mp3_320": "320", "flac": "flac"}[item.fmt],
+                       "output": os.path.abspath(item.output_path), "arl": deezer_arl}
+            json.dump(payload, proc.stdin)
+            proc.stdin.close()
+        tracker = None if item.is_spotify else YtdlpProgress()
+        for line in proc.stdout:
+            line = line.rstrip()
+            if item.is_spotify:
+                if line.startswith("WAX_EVENT:"):
+                    event = gofi_event(line[len("WAX_EVENT:"):])
+                    if event is not None:
+                        q.put("__WAX__:" + json.dumps(event))
+                continue
+            for event in tracker.feed(line):
+                q.put("__WAX__:" + json.dumps(event))
+            if "Destination:" in line:
+                entry["filename"] = os.path.basename(line.split("Destination:", 1)[1].strip())
+            elif "has already been downloaded" in line:
+                fname = line.split("]", 1)[-1].strip().split(" has already")[0].strip()
+                if fname:
+                    entry["filename"] = os.path.basename(fname)
+        proc.wait()
+        active_procs.discard(proc)
+        item.release()
+        if item.cancelled:
+            raise _Cancelled()
+        ok = proc.returncode == 0
+        if tracker is not None:
+            events, ok = tracker.finish(proc.returncode)
+            if not ok and tracker.outdated and update_after_failure(q):
+                events.insert(-1, {"type": "error", "message": UPDATED_MESSAGE})
+            for event in events:
+                q.put("__WAX__:" + json.dumps(event))
+        status = "done" if ok else "error"
+    except _Cancelled:
+        status = "cancelled"
+    except Exception as e:
+        status = "cancelled" if item.cancelled else "error"
+        if status == "error":
             q.put("__WAX__:" + json.dumps({"type": "error", "message": friendly_error(str(e))}))
-        finally:
-            active_procs.discard(proc)
-            finished()
-            if is_spotify and workdir:
-                workdir.cleanup()
-            q.put(f"__DONE__:{status}")
-            # if the window never subscribed (or dropped off), do not keep it forever
-            reaper = threading.Timer(STREAM_TTL, active_streams.pop, (stream_id, None))
-            reaper.daemon = True  # must not hold the app open on quit
-            reaper.start()
+    finally:
+        if proc is not None and proc.poll() is None:
+            kill_tree(proc)
+        active_procs.discard(proc)
+        if workdir:
+            workdir.cleanup()
+        item.remove_partials()
+        item.close(status)
 
-    threading.Thread(target=run, daemon=True).start()
-    return jsonify({"stream_id": stream_id})
+
+class _Cancelled(Exception):
+    pass
+
+
+downloads = DownloadQueue(run_download)
 
 
 def update_after_failure(q):
@@ -736,11 +939,9 @@ class Api:
             self.quit()
 
     def stop_downloads(self):
+        downloads.cancel_all()
         for p in list(active_procs):
-            try:
-                p.terminate()
-            except Exception:
-                pass
+            kill_tree(p)
 
     def quit(self):
         self.stop_downloads()
@@ -862,6 +1063,8 @@ def main():
             target=lambda: app.run(host=HOST, port=PORT, debug=False), daemon=True
         ).start()
         _wait_for_server()
+        # leftovers of a run that was killed with the app last time
+        shutil.rmtree(TEMP_DIR, ignore_errors=True)
         ytdlp_manager.start()  # only the instance that runs the downloads
 
     # easy_drag would move the window on *any* mouse drag, so text could never be
