@@ -138,8 +138,89 @@ FORMATS = {
     "mp3_320": ["-x", "--audio-format", "mp3", "--audio-quality", "0"],
     "flac":    ["-x", "--audio-format", "flac"],
     "wav":     ["-x", "--audio-format", "wav"],
-    "aac":     ["-x", "--audio-format", "aac", "--audio-quality", "0"],
+    # AAC in an .m4a (MP4) container: raw .aac (ADTS) cannot hold tags or a
+    # cover, and an AAC source (YouTube itag 140) is copied without re-encoding.
+    "aac":     ["-x", "--audio-format", "m4a", "--audio-quality", "0"],
 }
+
+# ---------------------------------------------------------------------------
+# File layout. yt-dlp has no "if this is a playlist" switch in -o, so the name
+# parts are computed into wax_* fields with --parse-metadata (each rule only
+# sets its fields when its regex matches; later rules override earlier ones)
+# and -o just glues them together:
+#   single track  -> <out>/Artist - Title.ext
+#   album         -> <out>/Artist - Album/01 Title.ext
+#   playlist      -> <out>/Playlist/01 Artist - Title.ext
+# The folder only uses playlist-level fields, so every track of one link lands
+# in the same folder. yt-dlp sanitizes each field (":" "?" "/" … become
+# full-width look-alikes, valid on macOS and Windows) and on Windows also fixes
+# trailing dots/spaces and reserved names itself, so --windows-filenames (which
+# would mangle "Vol. 2..." on macOS too) is not passed.
+# ---------------------------------------------------------------------------
+OUTPUT_TEMPLATE = "%(wax_dir|.)s/%(wax_num&{} |)s%(wax_file)s.%(ext)s"
+
+_DASH = r"\s+[-–—]\s+"   # " - ", " – ", " — "
+NAMING_RULES = [
+    # default name: Artist - Title
+    "%(artist,uploader,channel|Unknown)s - %(track,title)s:%(wax_file)s",
+    # the title already starts with the artist ("Rick Astley - Never Gonna…"):
+    # keep it as is instead of "Rick Astley - Rick Astley - …"; tag the rest
+    "%(artist,uploader,channel|)s\n%(track,title)s"
+    ":(?is)^(?P<wax_x>[^\n]+)\n(?P<wax_file>(?P=wax_x)" + _DASH + "(?P<meta_title>.+))$",
+    # no artist metadata, but the title reads "Artist - Title" (label channels)
+    "%(artist|)s\n%(track|)s\n%(title)s"
+    ":(?s)^\n\n(?P<wax_file>(?P<meta_artist>[^\n]+?)" + _DASH + "(?P<meta_title>.+))$",
+    # inside a playlist: folder = playlist title, number = position
+    # (a folder needs a letter or digit, so a title like ".." cannot climb out)
+    "%(playlist_index|)s\n%(playlist_title,playlist|)s"
+    ":(?s)^\\d+\n(?P<wax_dir>[^\n]*\\w[^\n]*)$",
+    "%(playlist_index)02d:(?P<wax_num>\\d+)",
+    # an album (its tracks' album == the playlist title): "Artist - Album"
+    # folder, the album's own track numbers, and no artist in the file name
+    "%(playlist_index|)s\n%(playlist_title|)s\n%(album_artist,playlist_uploader,artist|)s - %(album|)s"
+    ":(?s)^\\d+\n(?P<wax_p>[^\n]+)\n(?P<wax_dir>[^\n]*\\w[^\n]* - (?P=wax_p))$",
+    "%(playlist_index|)s\n%(playlist_title|)s\n%(album|)s\n%(track_number)02d\n%(track,title)s"
+    ":(?s)^\\d+\n(?P<wax_p>[^\n]+)\n(?P=wax_p)\n(?P<wax_num>\\d+)\n(?P<wax_file>.+)$",
+]
+
+# Tags on top of what --embed-metadata maps by itself (title, artist, album,
+# album_artist, track_number, upload_date as date).
+TAG_RULES = [
+    "%(release_year,release_date>%Y,upload_date>%Y|)s:%(meta_date)s",
+    "%(track_number,playlist_index|)s:%(meta_track)s",
+]
+
+# Center-crop covers to a square (YouTube thumbnails are 16:9). Only applies
+# when the thumbnail is actually converted (webp -> jpg); jpg covers from
+# Bandcamp/SoundCloud are already square and are left alone.
+SQUARE_COVER = 'ThumbnailsConvertor+ffmpeg_o:-vf "crop=min(iw\\,ih):min(iw\\,ih)"'
+# Containers that can carry embedded cover art (WAV cannot).
+COVER_FORMATS = {"mp3_128", "mp3_320", "flac", "aac"}
+
+
+def build_ytdlp_command(url, fmt, output_path, ytdlp=None, ffmpeg_location=None):
+    fmt = fmt if fmt in FORMATS else "mp3_320"
+    cmd = list(ytdlp or YTDLP_CMD) + FORMATS[fmt] + [
+        # one download pass (no separate video+audio + merge), one progress ramp
+        "-f", "bestaudio/best",
+        "--newline",      # progress updates as lines, not \r-glued into one blob
+        "--no-playlist",  # a track link with ?list= context is still one track
+        "--no-colors",
+        "--ignore-config",       # a user's own yt-dlp config must not move files elsewhere
+        "--no-abort-on-error",   # a dead track in a playlist skips, the rest still downloads
+        "-o", OUTPUT_TEMPLATE,
+        "-P", output_path,
+        "-P", f"temp:{TEMP_DIR}",
+        "--embed-metadata",
+    ]
+    for rule in NAMING_RULES + TAG_RULES:
+        cmd += ["--parse-metadata", rule]
+    if fmt in COVER_FORMATS:
+        cmd += ["--embed-thumbnail", "--convert-thumbnails", "jpg", "--ppa", SQUARE_COVER]
+    if ffmpeg_location:
+        cmd += ["--ffmpeg-location", ffmpeg_location]
+    cmd += ["--", url]
+    return cmd
 
 
 def load_config():
@@ -274,20 +355,8 @@ def download():
         if not deezer_arl:
             return jsonify({"error": "Connect Deezer first"}), 400
 
-    fmt_args = FORMATS.get(fmt, FORMATS["mp3_320"])
     os.makedirs(TEMP_DIR, exist_ok=True)
-    cmd = YTDLP_CMD + fmt_args + [
-        # one download pass (no separate video+audio + merge), one progress ramp
-        "-f", "bestaudio/best",
-        "--newline",      # progress updates as lines, not \r-glued into one blob
-        "--no-playlist",  # a track link with ?list= context is still one track
-        "-o", "%(title)s.%(ext)s",
-        "-P", output_path,
-        "-P", f"temp:{TEMP_DIR}",
-    ]
-    if FFMPEG_LOCATION:
-        cmd += ["--ffmpeg-location", FFMPEG_LOCATION]
-    cmd.append(url)
+    cmd = build_ytdlp_command(url, fmt, output_path, ffmpeg_location=FFMPEG_LOCATION)
 
     q = queue.Queue()
     stream_id = next(_stream_ids)

@@ -50,9 +50,19 @@ def main():
 
     # one download pass, one file left behind, one track per link
     dl = inspect.getsource(wax.download)
-    assert '"-k"' not in dl, "-k keeps the source video next to the mp3"
-    for flag in ("bestaudio/best", "--newline", "--no-playlist", "expanduser"):
-        assert flag in dl, f"download() lost {flag}"
+    assert "expanduser" in dl, "download() lost expanduser"
+    cmd = wax.build_ytdlp_command("https://example.com/a", "mp3_320", "/out", ytdlp=["yt-dlp"])
+    assert "-k" not in cmd, "-k keeps the source video next to the mp3"
+    for flag in ("bestaudio/best", "--newline", "--no-playlist", "--ignore-config",
+                 "--embed-metadata", "--embed-thumbnail"):
+        assert flag in cmd, f"yt-dlp command lost {flag}"
+    assert cmd[-2:] == ["--", "https://example.com/a"], "the link must come after --"
+    assert cmd[cmd.index("-o") + 1] == wax.OUTPUT_TEMPLATE
+    assert cmd[cmd.index("-P") + 1] == "/out"
+    # WAV cannot carry a cover; asking for one would fail the download
+    assert "--embed-thumbnail" not in wax.build_ytdlp_command("u", "wav", "/out", ytdlp=["y"])
+    # "AAC" is AAC in an .m4a container, which can hold tags and a cover
+    assert wax.FORMATS["aac"][wax.FORMATS["aac"].index("--audio-format") + 1] == "m4a"
 
     # quitting must not leave yt-dlp/ffmpeg running (Api.window is None here,
     # so nothing tries to close a window)
