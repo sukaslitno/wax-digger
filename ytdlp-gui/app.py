@@ -15,6 +15,8 @@ from urllib.parse import urlsplit
 import webview
 from flask import Flask, Response, jsonify, render_template, request, send_from_directory
 
+import ytdlp_update
+
 HOST = "127.0.0.1"
 PORT = 7337
 URL = f"http://{HOST}:{PORT}"
@@ -82,7 +84,6 @@ def find_ffmpeg_location():
     return None
 
 
-YTDLP_CMD = find_ytdlp()
 FFMPEG_LOCATION = find_ffmpeg_location()
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".wax-digger_config.json")
 
@@ -201,7 +202,7 @@ COVER_FORMATS = {"mp3_128", "mp3_320", "flac", "aac"}
 
 def build_ytdlp_command(url, fmt, output_path, ytdlp=None, ffmpeg_location=None):
     fmt = fmt if fmt in FORMATS else "mp3_320"
-    cmd = list(ytdlp or YTDLP_CMD) + FORMATS[fmt] + [
+    cmd = list(ytdlp if ytdlp is not None else ytdlp_manager.current()) + FORMATS[fmt] + [
         # one download pass (no separate video+audio + merge), one progress ramp
         "-f", "bestaudio/best",
         "--newline",      # progress updates as lines, not \r-glued into one blob
@@ -274,6 +275,20 @@ def friendly_error(line):
     return GENERIC_ERROR
 
 
+def extractor_outdated(line):
+    """Does this yt-dlp ERROR look like a stale extractor (fixed by updating)?
+
+    Errors with a known, unrelated cause (sign-in, bot check, private, geo,
+    rate limit, network…) never count, even if yt-dlp asks for a bug report.
+    """
+    text = (line or "").lower()
+    if any(hint in text for hint in ytdlp_update.OUTDATED_SURE):
+        return True
+    if friendly_error(line) not in (GENERIC_ERROR, "the site refused the download, try again later"):
+        return False
+    return any(hint in text for hint in ytdlp_update.OUTDATED_HINTS)
+
+
 _ITEM_RE = re.compile(r"^\[download\] Downloading item (\d+) of (\d+)")
 _PERCENT_RE = re.compile(r"^\[download\]\s+([\d.]+)%")
 _CONVERT_RE = re.compile(r"^\[(ExtractAudio|Metadata|EmbedThumbnail|FixupM4a|FixupM3u8)\]")
@@ -299,6 +314,7 @@ class YtdlpProgress:
         self.failed = set()     # items that hit an ERROR
         self.finished = set()   # items whose audio file was written
         self.first_error = ""
+        self.outdated = False   # an error suggests updating yt-dlp
         self.last_percent = -1.0
         self.last_message = None
 
@@ -329,6 +345,7 @@ class YtdlpProgress:
             return self._progress(self._label())
         if line.startswith("ERROR:"):
             self.failed.add(self.index)
+            self.outdated = self.outdated or extractor_outdated(line)
             message = friendly_error(line)
             if not self.first_error:
                 self.first_error = message
@@ -388,14 +405,28 @@ def gofi_event(raw):
 def load_config():
     try:
         with open(CONFIG_PATH) as f:
-            return json.load(f)
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data
     except Exception:
-        return {"output_path": DEFAULT_FOLDER}
+        pass
+    return {"output_path": DEFAULT_FOLDER}
 
 
 def save_config(data):
     with open(CONFIG_PATH, "w") as f:
         json.dump(data, f)
+
+
+# The yt-dlp a download runs is resolved per download: a user copy in the app
+# data dir that keeps itself current, or the bundled one if that is newer.
+ytdlp_manager = ytdlp_update.YtdlpManager(
+    base=find_ytdlp,
+    bundled=lambda: bundled_binary("yt-dlp"),
+    load_config=load_config,
+    save_config=save_config,
+)
+UPDATED_MESSAGE = "updated yt-dlp — try again"
 
 
 def pick_folder():
@@ -465,7 +496,8 @@ def font():
 @app.route("/status")
 def status():
     cfg = load_config()
-    return jsonify({"status": "running", "output_path": cfg.get("output_path", DEFAULT_FOLDER)})
+    return jsonify({"status": "running", "output_path": cfg.get("output_path", DEFAULT_FOLDER),
+                    "ytdlp_version": ytdlp_manager.known_version()})
 
 
 @app.route("/get-folder")
@@ -518,7 +550,14 @@ def download():
             return jsonify({"error": "Connect Deezer first"}), 400
 
     os.makedirs(TEMP_DIR, exist_ok=True)
-    cmd = build_ytdlp_command(url, fmt, output_path, ffmpeg_location=FFMPEG_LOCATION)
+    # counted before the binary is picked, so an update can't swap it underneath
+    ytdlp_manager.begin_download()
+    try:
+        cmd = None if is_spotify else build_ytdlp_command(url, fmt, output_path,
+                                                          ffmpeg_location=FFMPEG_LOCATION)
+    except Exception:
+        ytdlp_manager.end_download()
+        raise
 
     q = queue.Queue()
     stream_id = next(_stream_ids)
@@ -532,6 +571,14 @@ def download():
     def run():
         proc = None
         workdir = None
+        running = True
+
+        def finished():
+            nonlocal running
+            if running:
+                running = False
+                ytdlp_manager.end_download()
+
         try:
             kwargs = {}
             if IS_WINDOWS:
@@ -575,9 +622,13 @@ def download():
                     if fname:
                         entry["filename"] = os.path.basename(fname)
             proc.wait()
+            active_procs.discard(proc)
+            finished()
             ok = proc.returncode == 0
             if tracker is not None:
                 events, ok = tracker.finish(proc.returncode)
+                if not ok and tracker.outdated and update_after_failure(q):
+                    events.insert(-1, {"type": "error", "message": UPDATED_MESSAGE})
                 for event in events:
                     q.put("__WAX__:" + json.dumps(event))
             status = "done" if ok else "error"
@@ -588,6 +639,7 @@ def download():
             q.put("__WAX__:" + json.dumps({"type": "error", "message": friendly_error(str(e))}))
         finally:
             active_procs.discard(proc)
+            finished()
             if is_spotify and workdir:
                 workdir.cleanup()
             q.put(f"__DONE__:{status}")
@@ -598,6 +650,18 @@ def download():
 
     threading.Thread(target=run, daemon=True).start()
     return jsonify({"stream_id": stream_id})
+
+
+def update_after_failure(q):
+    """A download failed like a stale extractor: update yt-dlp right away.
+
+    The download is already over; this only delays its final error while the
+    status line says what is going on. True if a newer yt-dlp is now in use.
+    """
+    if not ytdlp_manager.force_due():
+        return False  # checked a moment ago, or another download is running
+    q.put("__WAX__:" + json.dumps({"type": "status", "message": "updating yt-dlp…"}))
+    return ytdlp_manager.check(force=True) == "updated"
 
 
 @app.route("/progress/<int:stream_id>")
@@ -798,6 +862,7 @@ def main():
             target=lambda: app.run(host=HOST, port=PORT, debug=False), daemon=True
         ).start()
         _wait_for_server()
+        ytdlp_manager.start()  # only the instance that runs the downloads
 
     # easy_drag would move the window on *any* mouse drag, so text could never be
     # selected in the url/folder fields. Instead only the modal backdrop itself

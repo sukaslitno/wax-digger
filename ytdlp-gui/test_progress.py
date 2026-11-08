@@ -162,7 +162,7 @@ class StreamTests(unittest.TestCase):
                         "sys.exit(1)\n")
             os.chmod(fake, 0o700)
             client = wax.app.test_client()
-            with patch.object(wax, "YTDLP_CMD", [fake]):
+            with patch.object(wax.ytdlp_manager, "current", return_value=[fake]):
                 r = client.post("/download", json={"url": "https://x.bandcamp.com/album/e",
                                                    "format": "mp3_128", "output_path": directory})
                 stream = client.get("/progress/%d" % r.json["stream_id"]).get_data(as_text=True)
