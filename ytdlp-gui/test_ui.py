@@ -36,7 +36,7 @@ def main():
     # details screen: an in-window screen like info, closed by the corner (x) and Esc,
     # every new string in one lookup for the coming translation
     for marker in ('id="detailsScreen"', 'id="detailsSummary"', 'id="detailsLog"', 'id="copyBtn"',
-                   'id="statusMore"', "const T = {", '"/log/"', '"copy_text"'):
+                   'id="statusMore"', "const STRINGS = ", '"/log/"', '"copy_text"'):
         assert marker in page, f"missing {marker}"
     assert 'class="btn btn--white btn--full" id="copyBtn"' in page, "copy must be the white button-large"
     assert "if (info || details) { info = details = false;" in page, "Esc must close the details screen"
@@ -85,7 +85,7 @@ def main():
 
     # while busy the one action button cancels the running download or queues
     # the next link; an unknown id is simply not cancelled
-    for marker in ('"/cancel/"', '"cancel"', '"add to queue"', '"cancelled"'):
+    for marker in ('"/cancel/"', '"btn.cancel": "cancel"', '"btn.add": "add to queue"', '"st.cancelled": "cancelled"'):
         assert marker in page, f"missing {marker}"
     assert c.post("/cancel/999999").get_json() == {"cancelled": False}
     assert callable(getattr(wax.Api, "on_closing", None)), "no closing-event handler"

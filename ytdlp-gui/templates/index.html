@@ -10,6 +10,13 @@
   font-style: normal; font-weight: 400; font-display: swap;
   src: url('dm-mono.woff2') format('woff2');
 }
+/* DM Mono has no Cyrillic: Russian letters come from JetBrains Mono (OFL) */
+@font-face {
+  font-family: 'WAX Cyrillic';
+  font-style: normal; font-weight: 400; font-display: swap;
+  src: url('jetbrains-mono-cyrillic.woff2') format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -39,7 +46,7 @@ html, body {
   position: relative; overflow: hidden;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 32px; padding: 32px;
-  font: 400 16px/normal 'DM Mono', ui-monospace, monospace;
+  font: 400 16px/normal 'DM Mono', 'WAX Cyrillic', ui-monospace, monospace;
   letter-spacing: -0.06em; color: #fff;
   -webkit-font-smoothing: antialiased;
 }
@@ -64,7 +71,7 @@ html, body {
   display: inline-flex; align-items: center; justify-content: center;
   gap: 6px; height: 64px; padding: 2px 24px;
   border: 0; border-radius: 999px; background: transparent;
-  font: 400 16px/normal 'DM Mono', ui-monospace, monospace;
+  font: 400 16px/normal 'DM Mono', 'WAX Cyrillic', ui-monospace, monospace;
   letter-spacing: -0.06em; cursor: pointer; white-space: nowrap;
   flex-shrink: 0;
 }
@@ -237,9 +244,9 @@ html, body {
           <path opacity="0.5" d="M10.409 17.834C9.92141 17.3464 9.53465 16.7677 9.27078 16.1307C9.00691 15.4937 8.8711 14.8109 8.8711 14.1215C8.8711 13.432 9.00691 12.7492 9.27078 12.1122C9.53465 11.4753 9.92141 10.8965 10.409 10.409L11.823 8.99496C11.8967 8.9263 11.9558 8.8435 11.9968 8.7515C12.0377 8.6595 12.0598 8.56019 12.0616 8.45948C12.0633 8.35878 12.0448 8.25875 12.0071 8.16536C11.9694 8.07197 11.9132 7.98714 11.842 7.91592C11.7708 7.8447 11.686 7.78856 11.5926 7.75084C11.4992 7.71312 11.3992 7.69459 11.2985 7.69637C11.1977 7.69815 11.0984 7.72019 11.0064 7.76118C10.9144 7.80217 10.8316 7.86127 10.763 7.93496L9.34698 9.34696C8.0811 10.6128 7.36993 12.3297 7.36993 14.12C7.36993 15.9102 8.0811 17.6271 9.34698 18.893C10.6129 20.1588 12.3298 20.87 14.12 20.87C15.9102 20.87 17.6271 20.1588 18.893 18.893L21.722 16.065C22.6435 15.1436 23.2787 13.9751 23.5507 12.7006C23.8228 11.4262 23.7201 10.1002 23.255 8.88281C22.79 7.66543 21.9825 6.6087 20.93 5.84019C19.8776 5.07169 18.6251 4.62427 17.324 4.55196C17.2256 4.54651 17.1271 4.56049 17.0342 4.59309C16.9412 4.6257 16.8556 4.6763 16.7822 4.74199C16.634 4.87467 16.5445 5.06081 16.5335 5.25946C16.5225 5.45811 16.5908 5.65299 16.7235 5.80124C16.8562 5.94949 17.0423 6.03895 17.241 6.04996C18.2528 6.10642 19.2267 6.45452 20.0451 7.05227C20.8635 7.65001 21.4913 8.47183 21.8529 9.41855C22.2145 10.3653 22.2944 11.3964 22.0829 12.3875C21.8714 13.3786 21.3775 14.2873 20.661 15.004L17.832 17.833C16.8474 18.8173 15.5122 19.3703 14.12 19.3703C12.7277 19.3703 11.3925 18.8173 10.408 17.833" fill="currentColor"/>
         </svg>
       </span>
-      <input id="url" type="text" placeholder="paste a track / album / playlist link" autocomplete="off" spellcheck="false">
-      <button type="button" class="btn btn--white input__chip input__chip--lead" id="modeChip" hidden>audio</button>
-      <button type="button" class="btn btn--white input__chip" id="fmtChip">mp3 128k</button>
+      <input id="url" type="text" data-i18n-placeholder="url.placeholder" autocomplete="off" spellcheck="false">
+      <button type="button" class="btn btn--white input__chip input__chip--lead" id="modeChip" hidden></button>
+      <button type="button" class="btn btn--white input__chip" id="fmtChip"></button>
     </label>
 
     <div class="row" id="folderRow" hidden>
@@ -251,19 +258,19 @@ html, body {
             <path d="M2 6.95C2 6.067 2 5.626 2.07 5.258C2.21922 4.46784 2.60314 3.741 3.17165 3.17231C3.74017 2.60361 4.46689 2.21947 5.257 2.07C5.626 2 6.068 2 6.95 2C7.336 2 7.53 2 7.716 2.017C8.51705 2.09223 9.27679 2.40728 9.896 2.921C10.04 3.04 10.176 3.176 10.45 3.45L11 4C11.816 4.816 12.224 5.224 12.712 5.495C12.9802 5.64449 13.2648 5.7626 13.56 5.847C14.098 6 14.675 6 15.828 6H16.202C18.834 6 20.151 6 21.006 6.77C21.0853 6.84 21.16 6.91467 21.23 6.994C22 7.849 22 9.166 22 11.798V14C22 17.771 22 19.657 20.828 20.828C19.656 21.999 17.771 22 14 22H10C6.229 22 4.343 22 3.172 20.828C2.001 19.656 2 17.771 2 14V6.95Z" stroke="currentColor" stroke-width="1.5"/>
           </svg>
         </span>
-        <input id="folder" type="text" placeholder="output folder" autocomplete="off" spellcheck="false">
+        <input id="folder" type="text" data-i18n-placeholder="folder.placeholder" autocomplete="off" spellcheck="false">
       </label>
-      <button type="button" class="btn btn--white" id="browseBtn">browse</button>
+      <button type="button" class="btn btn--white" id="browseBtn" data-i18n="browse"></button>
     </div>
     <div class="row" id="deezerRow" hidden>
       <label class="input" id="deezerInput">
-        <input id="deezerArl" type="password" placeholder="deezer arl" aria-label="deezer arl" autocomplete="off" spellcheck="false">
+        <input id="deezerArl" type="password" data-i18n-placeholder="deezer.arl" data-i18n-aria="deezer.arl" autocomplete="off" spellcheck="false">
       </label>
-      <button type="button" class="btn btn--white" id="connectDeezer">connect</button>
+      <button type="button" class="btn btn--white" id="connectDeezer" data-i18n="connect"></button>
     </div>
   </div>
 
-  <button type="button" class="btn btn--yellow btn--full" id="actionBtn" hidden>grab the wax</button>
+  <button type="button" class="btn btn--yellow btn--full" id="actionBtn" hidden></button>
   <p class="status-text" id="downloadStatus" role="status" aria-live="polite" hidden><span id="statusMsg"></span><span id="statusMore"></span></p>
 
   <!-- ===== details screen: what failed and why, then the raw log ===== -->
@@ -274,12 +281,12 @@ html, body {
       <pre class="details__log" id="detailsLog"></pre>
     </div>
   </div>
-  <button type="button" class="btn btn--white btn--full" id="copyBtn" hidden>copy</button>
+  <button type="button" class="btn btn--white btn--full" id="copyBtn" hidden></button>
 
   <!-- ===== info screen ===== -->
   <div class="info__text" id="infoText" hidden>
-    <p>thanks for using wax! luv y'all &lt;3</p>
-    <p>here u can find other links for my projects:</p>
+    <p data-i18n="info.thanks"></p>
+    <p data-i18n="info.links"></p>
   </div>
   <div class="row row--info" id="infoRow" hidden>
     <button type="button" class="btn btn--brand" style="--edge:#6880ED" data-link="github" aria-label="GitHub">
@@ -306,7 +313,7 @@ html, body {
         </svg>
       </span>
     </button>
-    <button type="button" class="btn btn--brand" style="--edge:#55BF70" data-link="donate" aria-label="Donate">
+    <button type="button" class="btn btn--brand" style="--edge:#55BF70" data-link="donate" data-i18n-aria="aria.donate">
       <span class="ic24" style="color:#71EF91">
         <svg viewBox="0 0 24 24" fill="none">
           <path d="M9 19C6.191 19 4.787 19 3.778 18.326C3.34106 18.0341 2.96591 17.6589 2.674 17.222C2 16.213 2 14.81 2 12C2 9.19 2 7.787 2.674 6.778C2.96591 6.34106 3.34106 5.96591 3.778 5.674C4.787 5 6.19 5 9 5H15C17.809 5 19.213 5 20.222 5.674C20.6589 5.96591 21.0341 6.34106 21.326 6.778C22 7.787 22 9.19 22 12C22 14.81 22 16.213 21.326 17.222C21.0341 17.6589 20.6589 18.0341 20.222 18.326C19.213 19 17.81 19 15 19H9Z" stroke="currentColor" stroke-width="1.5"/>
@@ -315,23 +322,24 @@ html, body {
         </svg>
       </span>
     </button>
+    <button type="button" class="btn btn--white btn--brand" id="langBtn" data-i18n-aria="aria.language"></button>
   </div>
-  <div class="info__made" id="infoMade" hidden>made by jeneverbes</div>
+  <div class="info__made" id="infoMade" hidden></div>
 
   <div class="wintools pywebview-drag-region" id="winTools" hidden>
     <div class="wintools__bar" id="winBar">
-      <button type="button" class="wintools__btn wintools__btn--close" id="winClose" aria-label="close">
+      <button type="button" class="wintools__btn wintools__btn--close" id="winClose" data-i18n-aria="aria.close">
         <span class="wintools__dot"><svg viewBox="0 0 12 12" fill="none"><path d="M4.2 4.2 7.8 7.8M7.8 4.2 4.2 7.8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span>
         <span class="ic24 wintools__ic"><svg viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
       </button>
-      <button type="button" class="wintools__btn wintools__btn--min" id="winMin" aria-label="minimize">
+      <button type="button" class="wintools__btn wintools__btn--min" id="winMin" data-i18n-aria="aria.minimize">
         <span class="wintools__dot"><svg viewBox="0 0 12 12" fill="none"><path d="M3.4 6h5.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span>
         <span class="ic24 wintools__ic"><svg viewBox="0 0 24 24" fill="none"><path d="M5 12h14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
       </button>
     </div>
   </div>
 
-  <button type="button" class="modal__corner" id="cornerBtn" aria-label="info">
+  <button type="button" class="modal__corner" id="cornerBtn">
     <span class="ic24" id="cornerIcon">
       <svg viewBox="0 0 24 24" fill="none">
         <path opacity="0.5" d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" stroke="currentColor" stroke-width="1.5"/>
@@ -342,6 +350,100 @@ html, body {
   </button>
 </div>
 
+<script type="application/json" id="strings">
+{
+  "en": {
+    "mode.audio": "audio",
+    "mode.video": "video",
+    "url.placeholder": "paste a track / album / playlist link",
+    "folder.placeholder": "output folder",
+    "browse": "browse",
+    "deezer.arl": "deezer arl",
+    "deezer.arl_change": "deezer arl (change session)",
+    "connect": "connect",
+    "deezer.added": "deezer session added for this launch",
+    "btn.error": "error",
+    "btn.wait": "wait",
+    "btn.show": "show in folder",
+    "btn.cancel": "cancel",
+    "btn.add": "add to queue",
+    "btn.grab": "grab the wax",
+    "st.starting": "starting…",
+    "st.connecting": "connecting to deezer…",
+    "st.cancelling": "cancelling…",
+    "st.saved": "saved",
+    "st.cancelled": "cancelled",
+    "st.queued": "{n} queued",
+    "st.lost": "lost the connection to wax",
+    "st.saved_n": "{saved} of {total} saved",
+    "st.links_saved": ["{saved} of {n} link saved", "{saved} of {n} links saved"],
+    "err.generic": "couldn't grab this one",
+    "drm": "{name} is drm-locked — try bandcamp, youtube or spotify",
+    "details.more": " · details",
+    "copy": "copy",
+    "copied": "copied",
+    "copy_failed": "couldn't copy",
+    "loading": "loading…",
+    "gone": "the log of this download is gone",
+    "already": "{n} already there",
+    "tracks": ["{n} track", "{n} tracks"],
+    "earlier": ["… {n} earlier line", "… {n} earlier lines"],
+    "info.thanks": "thanks for using wax! luv y'all <3",
+    "info.links": "here u can find other links for my projects:",
+    "made": "made by jeneverbes",
+    "aria.info": "info",
+    "aria.close": "close",
+    "aria.minimize": "minimize",
+    "aria.donate": "donate",
+    "aria.language": "language"
+  },
+  "ru": {
+    "mode.audio": "аудио",
+    "mode.video": "видео",
+    "url.placeholder": "ссылка на трек, альбом или плейлист",
+    "folder.placeholder": "папка для файлов",
+    "browse": "выбрать",
+    "deezer.arl": "deezer arl",
+    "deezer.arl_change": "deezer arl (сменить сессию)",
+    "connect": "подключить",
+    "deezer.added": "сессия deezer добавлена на этот запуск",
+    "btn.error": "ошибка",
+    "btn.wait": "подожди",
+    "btn.show": "показать в папке",
+    "btn.cancel": "отменить",
+    "btn.add": "в очередь",
+    "btn.grab": "забрать винил",
+    "st.starting": "запускаю…",
+    "st.connecting": "подключаюсь к deezer…",
+    "st.cancelling": "отменяю…",
+    "st.saved": "сохранено",
+    "st.cancelled": "отменено",
+    "st.queued": "{n} в очереди",
+    "st.lost": "потеряна связь с wax",
+    "st.saved_n": "{saved} из {total} сохранено",
+    "st.links_saved": ["{saved} из {n} ссылки сохранено", "{saved} из {n} ссылок сохранено", "{saved} из {n} ссылок сохранено"],
+    "err.generic": "не вышло забрать это",
+    "drm": "{name} под drm — попробуй bandcamp, youtube или spotify",
+    "details.more": " · подробности",
+    "copy": "скопировать",
+    "copied": "скопировано",
+    "copy_failed": "не вышло скопировать",
+    "loading": "загружаю…",
+    "gone": "лог этой загрузки пропал",
+    "already": "{n} уже есть",
+    "tracks": ["{n} трек", "{n} трека", "{n} треков"],
+    "earlier": ["… ещё {n} строка выше", "… ещё {n} строки выше", "… ещё {n} строк выше"],
+    "info.thanks": "спасибо, что пользуешься wax! люблю вас <3",
+    "info.links": "тут другие ссылки на мои проекты:",
+    "made": "сделал jeneverbes",
+    "aria.info": "инфо",
+    "aria.close": "закрыть",
+    "aria.minimize": "свернуть",
+    "aria.donate": "поддержать",
+    "aria.language": "язык"
+  }
+}
+</script>
 <script>
 // Links shown on the info screen.
 const LINKS = {
@@ -357,21 +459,48 @@ const ICON_CLOSE = `<svg viewBox="0 0 24 24" fill="none">
   <path d="M14.5 9.5L9.5 14.5M9.5 9.5L14.5 14.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
 </svg>`;
 
-// Every string the details screen and the audio / video chip add, in one place for translation.
-const T = {
-  audio: "audio",
-  video: "video",
-  details: " · details",
-  copy: "copy",
-  copied: "copied",
-  copyFailed: "couldn't copy",
-  loading: "loading…",
-  gone: "the log of this download is gone",
-  saved: (saved, total) => `${saved} of ${total} saved`,
-  alreadyThere: (n) => `${n} already there`,
-  tracks: (n) => `${n} tracks`,
-  earlier: (n) => `… ${n} earlier lines`,
-};
+// All the copy of the page is in the #strings dictionary above, one block per
+// language, under keys. t() looks one up; a list value holds plural forms.
+const STRINGS = JSON.parse(document.getElementById("strings").textContent);
+const LANGUAGES = Object.keys(STRINGS);
+
+// Which plural form a number takes: 0 one, 1 few (ru) / other (en), 2 many (ru).
+function pluralIndex(l, n) {
+  n = Math.abs(n);
+  if (l === "ru") {
+    if (n % 10 === 1 && n % 100 !== 11) return 0;
+    if (n % 10 >= 2 && n % 10 <= 4 && !(n % 100 >= 12 && n % 100 <= 14)) return 1;
+    return 2;
+  }
+  return n === 1 ? 0 : 1;
+}
+
+function guessLanguage() {
+  const own = (navigator.languages && navigator.languages[0]) || navigator.language || "";
+  return /^ru\b/i.test(own) ? "ru" : "en";
+}
+
+let lang = guessLanguage();
+
+function t(key, vars = {}) {
+  let text = (STRINGS[lang] || {})[key];
+  if (text === undefined) text = STRINGS.en[key];
+  if (Array.isArray(text)) text = text[Math.min(pluralIndex(lang, vars.n === undefined ? 1 : vars.n), text.length - 1)];
+  return text.replace(/\{(\w+)\}/g, (m, name) => (name in vars ? vars[name] : m));
+}
+
+// A status the page wrote itself is kept as {k, v} so it follows a language
+// switch; one that came from the server is plain text, in the language it had then.
+const msg = (k, v) => ({ k, v });
+const msgText = (m) => (typeof m === "string" ? m : t(m.k, m.v));
+
+// Static markup carries data-i18n (text), data-i18n-placeholder and data-i18n-aria.
+function applyLanguage() {
+  document.documentElement.lang = lang;
+  for (const node of document.querySelectorAll("[data-i18n]")) node.textContent = t(node.dataset.i18n);
+  for (const node of document.querySelectorAll("[data-i18n-placeholder]")) node.placeholder = t(node.dataset.i18nPlaceholder);
+  for (const node of document.querySelectorAll("[data-i18n-aria]")) node.setAttribute("aria-label", t(node.dataset.i18nAria));
+}
 
 const FORMATS = [
   ["mp3_128", "mp3 128k"],
@@ -402,6 +531,7 @@ let info = false;
 let details = false;     // the details screen of the last failed download(s)
 let detailsLogs = null;  // their logs from the server, null while loading
 let copyTimer = 0;
+let copyState = "copy";  // the copy button: copy | copied | copy_failed
 let urlInvalid = false;
 let addFailed = false;   // the server refused the link typed while busy
 // Links handed to the server, in its order; jobs[0] is the one running.
@@ -412,7 +542,7 @@ let posting = "";       // the link being handed to the server right now
 let lastHeight = 0;
 let doneTimer = 0;
 let deezerAvailable = false;
-let statusMessage = "";
+let statusMessage = "";   // plain text from the server, or msg(key, vars) written here
 let statusError = false;
 let drmName = "";        // the DRM-locked service the link in the field belongs to
 let revealPath = "";     // what "show in folder" opens after a finished download
@@ -477,7 +607,7 @@ function render() {
   const filled = hasUrl || phase !== "idle";
   if (spotify && fmtIndex > 2) fmtIndex = 0;
   el("modeChip").hidden = !isYouTubeVideo(urlEl.value);
-  el("modeChip").textContent = videoMode ? T.video : T.audio;
+  el("modeChip").textContent = t(videoMode ? "mode.video" : "mode.audio");
   el("fmtChip").textContent = chosenFormat()[1];
 
   if (details && !hasDetails()) details = false;
@@ -485,7 +615,7 @@ function render() {
   el("mainScreen").hidden = screen;
   el("folderRow").hidden = screen || !filled;
   el("deezerRow").hidden = screen || !hasUrl || !needsDeezer;
-  el("deezerArl").placeholder = deezerAvailable ? "deezer arl (change session)" : "deezer arl";
+  el("deezerArl").placeholder = t(deezerAvailable ? "deezer.arl_change" : "deezer.arl");
   actionBtn.hidden = screen || !filled || !hasFolder;
   el("infoText").hidden = !info;
   el("infoRow").hidden = !info;
@@ -495,7 +625,7 @@ function render() {
 
   el("cornerIcon").innerHTML = screen ? ICON_CLOSE : ICON_INFO;
   el("cornerBtn").classList.toggle("modal__corner--close", screen);
-  el("cornerBtn").setAttribute("aria-label", screen ? "close" : "info");
+  el("cornerBtn").setAttribute("aria-label", t(screen ? "aria.close" : "aria.info"));
 
   urlInput.dataset.state = urlInvalid || addFailed ? "error" : "default";
   // the link field stays open for the next link; format and folder belong to
@@ -511,25 +641,28 @@ function render() {
   actionBtn.className = "btn btn--full " +
     (phase === "error" ? "btn--red" : waiting || phase === "done" || action === "cancel" ? "btn--white" : "btn--yellow");
   actionBtn.textContent =
-    phase === "error" ? "error" : waiting ? "wait" : phase === "done" ? "show in folder"
-    : action === "cancel" ? "cancel" : action === "add" ? "add to queue" : "grab the wax";
+    t(phase === "error" ? "btn.error" : waiting ? "btn.wait" : phase === "done" ? "btn.show"
+    : action === "cancel" ? "btn.cancel" : action === "add" ? "btn.add" : "btn.grab");
   actionBtn.disabled = waiting || !!posting ||
     (action === "cancel" ? !jobs.length || jobs[0].cancelling : urlInvalid || needsDeezer);
   const queued = phase === "busy" ? jobs.length - 1 : 0;
   // a link that cannot work says why, until a download has something to report
   const drm = urlInvalid && phase !== "busy" ? drmMessage(drmName) : "";
-  const status = drm || (statusMessage && queued > 0 ? `${statusMessage} · ${queued} queued` : statusMessage);
+  const shown = msgText(statusMessage);
+  const status = drm || (shown && queued > 0 ? `${shown} · ${t("st.queued", { n: queued })}` : shown);
   // a failed or partial download offers its details right on the status line
   const more = !drm && hasDetails();
   el("downloadStatus").hidden = screen || !status;
   el("statusMsg").textContent = status;
-  el("statusMore").textContent = more ? T.details : "";
+  el("statusMore").textContent = more ? t("details.more") : "";
   el("downloadStatus").dataset.more = String(more);
   el("downloadStatus").tabIndex = more ? 0 : -1;
   el("downloadStatus").dataset.error = String(!!drm || statusError);
   el("downloadStatus").dataset.clip = String(phase === "done");
-  el("infoMade").textContent = ["made by jeneverbes", appVersion && "v" + appVersion,
+  el("infoMade").textContent = [t("made"), appVersion && "v" + appVersion,
     ytdlpVersion && "yt-dlp " + ytdlpVersion].filter(Boolean).join(" · ");
+  el("langBtn").textContent = lang;
+  el("copyBtn").textContent = t(copyState);
 
   progressEl.hidden = screen || phase === "idle";
 
@@ -583,7 +716,7 @@ el("connectDeezer").addEventListener("click", async () => {
     if (!response.ok) throw new Error(data.error);
     deezerAvailable = true;
     el("deezerArl").value = "";
-    statusMessage = "deezer session added for this launch";
+    statusMessage = msg("deezer.added");
     statusError = false;
   } catch (e) { statusMessage = e.message; statusError = true; }
   render();
@@ -599,7 +732,7 @@ el("browseBtn").addEventListener("click", async () => {
 // ===== download =====
 // The server turns both yt-dlp and the Deezer adapter into the same events:
 // status / progress {percent, message} / error {message} / result {saved, failed, total}.
-function savedText(r) { return `${r.saved} of ${r.total} saved`; }
+const savedMsg = (r) => msg("st.saved_n", { saved: r.saved, total: r.total });
 
 // Hand the link in the field to the server. The first one starts a busy
 // stretch; while busy, each further one waits its turn there.
@@ -610,7 +743,7 @@ async function enqueue() {
     phase = "busy";
     jobs = [];
     batch = { saved: 0, failed: 0, cancelled: 0, total: 0, error: "", result: null, folder: "", failedIds: [] };
-    statusMessage = isSpotify(url) ? "connecting to deezer…" : "starting…";
+    statusMessage = msg(isSpotify(url) ? "st.connecting" : "st.starting");
     statusError = false;
     progressEl.dataset.state = "";
     setProgress(0);
@@ -647,7 +780,7 @@ async function enqueue() {
 
 // Read the running download's stream; when it ends, move on to the next one.
 function follow(job) {
-  statusMessage = isSpotify(job.url) ? "connecting to deezer…" : "starting…";
+  statusMessage = msg(isSpotify(job.url) ? "st.connecting" : "st.starting");
   statusError = false;
   setProgress(0);
   let result = null, errorMessage = "";
@@ -666,7 +799,7 @@ function follow(job) {
       if (event.type === "progress" && !job.cancelling) setProgress(event.percent);
       if (event.type === "error") {
         errorMessage = event.message;
-        if (event.message.startsWith("could not connect to deezer")) deezerAvailable = false;
+        if (event.code === "go.connect") deezerAvailable = false;
       }
       if (event.type === "result") result = event;
       render();
@@ -674,7 +807,7 @@ function follow(job) {
   };
   es.onerror = () => {
     es.close();
-    if (phase === "busy" && jobs[0] === job) { jobs = []; fail("lost the connection to wax"); }
+    if (phase === "busy" && jobs[0] === job) { jobs = []; fail(msg("st.lost")); }
   };
 }
 
@@ -690,7 +823,7 @@ function finished(job, how, result, errorMessage) {
     batch.failed++;
     batch.failedIds.push(job.id);
     // a playlist that saved some tracks reports how many, not the first error
-    batch.error = result && result.saved > 0 ? savedText(result) : errorMessage;
+    batch.error = result && result.saved > 0 ? savedMsg(result) : errorMessage;
   }
   if (jobs.length) { follow(jobs[0]); render(); return; }
   if (posting) { render(); return; }  // a link is on its way in; it picks up from here
@@ -703,14 +836,14 @@ function settle() {
   if (counted === 0) { cancelled(); return; }
   if (batch.failed === 0) succeed(counted === 1 ? batch.result : null, counted);
   else if (counted === 1 || batch.saved === 0) fail(batch.error);
-  else fail(`${batch.saved} of ${counted} links saved`);
+  else fail(msg("st.links_saved", { saved: batch.saved, n: counted }));
 }
 
 async function cancelCurrent() {
   const job = jobs[0];
   if (!job || job.cancelling) return;
   job.cancelling = true;
-  statusMessage = "cancelling…";
+  statusMessage = msg("st.cancelling");
   statusError = false;
   render();
   try { await fetch("/cancel/" + job.id, { method: "POST" }); } catch (e) {}
@@ -726,9 +859,9 @@ function succeed(result, links = 1) {
   const paths = (links === 1 && result && result.paths) || [];
   const single = paths.length === 1 && result.total === 1;
   phase = "done";
-  statusMessage = links > 1 ? `${links} of ${links} links saved`
-    : result && result.total > 1 ? savedText(result)
-    : single ? fileName(paths[0]) : "saved";
+  statusMessage = links > 1 ? msg("st.links_saved", { saved: links, n: links })
+    : result && result.total > 1 ? savedMsg(result)
+    : single ? fileName(paths[0]) : msg("st.saved");
   revealPath = single ? paths[0] : (links === 1 && result && result.folder) || batch.folder;
   setProgress(100);
   progressEl.dataset.state = "done";
@@ -737,7 +870,7 @@ function succeed(result, links = 1) {
 
 function cancelled() {
   phase = "cancelled";
-  statusMessage = "cancelled";
+  statusMessage = msg("st.cancelled");
   statusError = false;
   setProgress(0);
   progressEl.dataset.state = "";
@@ -758,9 +891,9 @@ function reset() {
 }
 
 function fail(reason) {
-  if (reason) console.error("[wax]", reason);
+  if (reason) console.error("[wax]", msgText(reason));
   phase = "error";
-  statusMessage = reason || "couldn't grab this one";
+  statusMessage = reason || msg("err.generic");
   statusError = true;
   progressEl.dataset.state = "error";
   render();
@@ -807,19 +940,19 @@ async function openDetails() {
   showDetails();
 }
 
-function trackName(t) {
-  if (!t.title && !t.artist && t.count) return T.tracks(t.count);
-  return t.artist && t.title ? `${t.artist} — ${t.title}` : t.title || t.artist || "";
+function trackName(track) {
+  if (!track.title && !track.artist && track.count) return t("tracks", { n: track.count });
+  return track.artist && track.title ? `${track.artist} — ${track.title}` : track.title || track.artist || "";
 }
 
 // One summary line, then each track that failed (or was skipped) and why.
 function detailsModel() {
   const logs = detailsLogs || [];
-  let summary = statusMessage;
+  let summary = msgText(statusMessage);
   if (logs.length === 1) {
     const r = logs[0].result;
     if (r && r.total > 1) {
-      summary = T.saved(r.saved, r.total) + (r.skipped ? ` · ${T.alreadyThere(r.skipped)}` : "");
+      summary = t("st.saved_n", { saved: r.saved, total: r.total }) + (r.skipped ? ` · ${t("already", { n: r.skipped })}` : "");
     } else if (logs[0].message) summary = logs[0].message;
   }
   const items = [];
@@ -827,12 +960,12 @@ function detailsModel() {
     const tracks = log.failures.concat(log.skipped);
     // several links: one with no per-track list is named by its link
     if (!tracks.length && logs.length > 1) items.push({ name: log.url, reason: log.message });
-    for (const t of tracks) items.push({ name: trackName(t), reason: t.reason, detail: t.detail || "" });
+    for (const track of tracks) items.push({ name: trackName(track), reason: track.reason, detail: track.detail || "" });
   }
   const lines = [];
   for (const log of logs) {
     if (logs.length > 1) lines.push(log.url);
-    if (log.dropped) lines.push(T.earlier(log.dropped));
+    if (log.dropped) lines.push(t("earlier", { n: log.dropped }));
     lines.push(...log.lines);
   }
   return { summary, items, lines };
@@ -842,8 +975,8 @@ function showDetails() {
   const tracks = el("detailsTracks");
   tracks.textContent = "";
   if (detailsLogs === null) {
-    el("detailsSummary").textContent = statusMessage;
-    el("detailsLog").textContent = T.loading;
+    el("detailsSummary").textContent = msgText(statusMessage);
+    el("detailsLog").textContent = t("loading");
     return;
   }
   const m = detailsModel();
@@ -860,7 +993,7 @@ function showDetails() {
     row.append(name, reason);
     tracks.append(row);
   }
-  el("detailsLog").textContent = detailsLogs.length ? m.lines.join("\n") : T.gone;
+  el("detailsLog").textContent = detailsLogs.length ? m.lines.join("\n") : t("gone");
   el("detailsScroll").scrollTop = 0;
 }
 
@@ -890,8 +1023,9 @@ el("downloadStatus").addEventListener("keydown", (e) => {
 el("copyBtn").addEventListener("click", async () => {
   const ok = await copyText(detailsText());
   clearTimeout(copyTimer);
-  el("copyBtn").textContent = ok ? T.copied : T.copyFailed;
-  copyTimer = setTimeout(() => { el("copyBtn").textContent = T.copy; }, 1500);
+  copyState = ok ? "copied" : "copy_failed";
+  render();
+  copyTimer = setTimeout(() => { copyState = "copy"; render(); }, 1500);
 });
 
 // ===== info screen =====
@@ -901,6 +1035,32 @@ el("cornerBtn").addEventListener("click", () => {
   if (info) loadStatus();
   render();
 });
+
+// ===== language =====
+// The switch is the white button at the end of the info row.
+// The server speaks the same language (its own messages), and keeps a switch
+// the user made in the settings; a guess from the system is not kept.
+function setLanguage(code, save) {
+  if (!LANGUAGES.includes(code)) return;
+  lang = code;
+  applyLanguage();
+  if (details) showDetails();
+  render();
+  fetch("/language", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ language: code, save }),
+  }).catch(() => {});
+}
+
+async function loadLanguage() {
+  try {
+    const d = await (await fetch("/language")).json();
+    setLanguage(d.saved ? d.language : guessLanguage(), false);
+  } catch (e) {}
+}
+
+// shows the language in use, like the format chip shows its format; a click switches to the other
+el("langBtn").addEventListener("click", () => setLanguage(LANGUAGES[(LANGUAGES.indexOf(lang) + 1) % LANGUAGES.length], true));
 
 el("infoRow").addEventListener("click", (e) => {
   const btn = e.target.closest("[data-link]");
@@ -930,7 +1090,7 @@ function drmService(host) {
   return hit ? hit[1] : "";
 }
 
-function drmMessage(name) { return `${name} is drm-locked — try bandcamp, youtube or spotify`; }
+function drmMessage(name) { return t("drm", { name }); }
 
 function hostOf(value) {
   try {
@@ -1043,7 +1203,8 @@ async function initTools() {
 window.addEventListener("pywebviewready", initTools);
 if (window.pywebview) initTools();  // in case the bridge landed before this ran
 
-el("copyBtn").textContent = T.copy;
+applyLanguage();
+loadLanguage();
 loadFolder();
 loadDeezer();
 loadStatus();

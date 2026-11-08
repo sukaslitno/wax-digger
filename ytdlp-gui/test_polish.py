@@ -152,7 +152,11 @@ class PageTests(unittest.TestCase):
     def test_drm_message_and_drop_parsing_in_the_page_js(self):
         page = open(PAGE, encoding="utf-8").read()
         block = lambda start, end: page[page.index(start):page.index(end, page.index(start))]
+        strings = re.search(r'<script type="application/json" id="strings">(.*?)</script>', page, re.S).group(1)
         src = "\n".join([
+            "const document = { getElementById: () => ({ textContent: %s }) };" % json.dumps(strings),
+            block("const STRINGS", "const msg"),
+            'lang = "en";',   # not the language of the machine running the test
             block("const UNSUPPORTED", "function validate"),
             block("function isLikelyUrl", "// While busy"),
             block("function hostOf", "function validate"),
@@ -161,6 +165,7 @@ class PageTests(unittest.TestCase):
         probe = src + """
         const out = {
           apple: drmMessage(drmService(hostOf("https://music.apple.com/us/album/x"))),
+          appleRu: (lang = "ru", drmMessage("apple music")),
           amazon: drmService(hostOf("music.amazon.co.uk/albums/x")),
           deezer: drmService(hostOf("https://www.deezer.com/track/1")),
           fine: [drmService(hostOf("https://open.spotify.com/track/1")), drmService(hostOf("https://x.bandcamp.com/a"))],
@@ -174,6 +179,7 @@ class PageTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         out = json.loads(r.stdout)
         self.assertEqual(out["apple"], "apple music is drm-locked — try bandcamp, youtube or spotify")
+        self.assertEqual(out["appleRu"], "apple music под drm — попробуй bandcamp, youtube или spotify")
         self.assertEqual(out["amazon"], "amazon music")
         self.assertEqual(out["deezer"], "deezer")
         self.assertEqual(out["fine"], ["", ""])

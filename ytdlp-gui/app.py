@@ -893,6 +893,11 @@ def font():
     return send_from_directory(os.path.join(RES, "templates"), "dm-mono.woff2")
 
 
+@app.route("/jetbrains-mono-cyrillic.woff2")
+def font_cyrillic():
+    return send_from_directory(os.path.join(RES, "templates"), "jetbrains-mono-cyrillic.woff2")
+
+
 @app.route("/status")
 def status():
     cfg = load_config()

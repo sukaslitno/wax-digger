@@ -235,8 +235,8 @@ class PageTests(unittest.TestCase):
         self.assertIn('class="btn btn--white input__chip input__chip--lead" id="modeChip" hidden', page)
         offered = re.findall(r'\["(video_\d+)", "(\d+p)"\]', page)
         self.assertEqual(offered, [(f, f"{h}p") for f, h in wax.VIDEO_FORMATS.items()])
-        self.assertIn('audio: "audio"', page)
-        self.assertIn('video: "video"', page)
+        self.assertIn('"mode.audio": "audio"', page)
+        self.assertIn('"mode.video": "video"', page)
 
 
 if __name__ == "__main__":
