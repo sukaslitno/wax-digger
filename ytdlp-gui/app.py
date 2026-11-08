@@ -346,6 +346,7 @@ class YtdlpProgress:
         self.failed = set()     # items that hit an ERROR
         self.finished = set()   # items whose audio file was written
         self.first_error = ""
+        self.errors = []        # [{"item", "message", "line"}] for the download log
         self.outdated = False   # an error suggests updating yt-dlp
         self.last_percent = -1.0
         self.last_message = None
@@ -402,6 +403,8 @@ class YtdlpProgress:
             message = friendly_error(line)
             if not self.first_error:
                 self.first_error = message
+            if len(self.errors) < LOG_TRACKS:
+                self.errors.append({"item": self.index, "message": message, "line": line})
             if self.playlist:
                 return []  # yt-dlp moves on to the next item; reported in the result
             return [{"type": "error", "message": message}]
@@ -457,6 +460,149 @@ def gofi_event(raw):
         m = _GOFI_PROGRESS_RE.match(message.strip())
         event["message"] = f"track {m.group(1)} of {m.group(2)}" if m else message.lower()
     return event
+
+
+# ---------------------------------------------------------------------------
+# Per-download log, for the "details" screen after a failed or partial
+# download: what failed and why first, then the tail of the raw output.
+# Memory only, the last LOG_KEEP downloads, never written to disk. Every line
+# is scrubbed of the Deezer ARL and anything that looks like a credential.
+# ---------------------------------------------------------------------------
+LOG_LINES = 400          # raw output lines kept per download (the tail)
+LOG_LINE_CHARS = 1000    # a single line longer than this is cut
+LOG_TRACKS = 500         # per-track failures / skips kept per download
+LOG_KEEP = 10            # downloads whose log is kept
+
+# every visible string the log adds, in one place for translation
+LOG_TEXT = {
+    "track_n": "track {n}",
+}
+
+HIDDEN = "[hidden]"
+_SECRET_RES = [
+    # arl=…, "arl": "…", arl: …
+    re.compile(r"(?i)(\barl[\"']?\s*[=:]\s*[\"']?)[^\s\"',;&]+"),
+    re.compile(r"(?i)(\b(?:authorization|cookie|set-cookie)\s*:\s*)[^\r\n]+"),
+    re.compile(r"(?i)(\bbearer\s+)[\w.~+/=-]+"),
+    re.compile(r"()\b[0-9a-fA-F]{120,}\b"),  # an ARL is 192 hex chars
+]
+
+
+def scrub(text, secrets=()):
+    """The text with known secrets and credential-looking values hidden."""
+    text = str(text)
+    for secret in secrets:
+        if secret and len(secret) >= 8:
+            text = text.replace(secret, HIDDEN)
+    for pattern in _SECRET_RES:
+        text = pattern.sub(lambda m: m.group(1) + HIDDEN, text)
+    return text
+
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")  # terminal colours from GoFi's logger
+
+
+def _clip(text, limit=LOG_LINE_CHARS):
+    text = str(text)
+    return text if len(text) <= limit else text[:limit] + "…"
+
+
+class DownloadLog:
+    def __init__(self, stream_id, url, fmt, source):
+        self._lock = threading.Lock()
+        self.id = stream_id
+        self.url = url
+        self.format = fmt
+        self.source = source                # "yt-dlp" | "deezer"
+        self.state = "queued"
+        self.message = ""                   # the error the window showed
+        self.result = None                  # the result event
+        self.failures = []                  # [{"artist", "title", "reason", "detail"?, "count"?}]
+        self.skipped = []                   # [{"artist", "title", "reason"}]
+        self.errors = []                    # [{"message", "line"}] classified error lines
+        self.lines = collections.deque(maxlen=LOG_LINES)
+        self.dropped = 0                    # lines that fell off the front
+
+    def _secrets(self):
+        return (deezer_arl,)
+
+    def _clean(self, text):
+        return _clip(scrub(text, self._secrets()))
+
+    def line(self, text):
+        text = self._clean(_ANSI_RE.sub("", text).rstrip())
+        with self._lock:
+            if len(self.lines) == self.lines.maxlen:
+                self.dropped += 1
+            self.lines.append(text)
+
+    def error(self, message, line=""):
+        with self._lock:
+            if len(self.errors) < LOG_TRACKS:
+                self.errors.append({"message": self._clean(message), "line": self._clean(line)})
+
+    def track(self, event):
+        """A wax-gofi track event: one track failed or was skipped."""
+        entry = {key: self._clean(event[key]) for key in ("artist", "title", "reason", "detail")
+                 if isinstance(event.get(key), str) and event.get(key)}
+        if isinstance(event.get("count"), int) and event["count"] > 0:
+            entry["count"] = event["count"]
+        entry.setdefault("reason", "")
+        target = self.skipped if event.get("status") == "skipped" else self.failures
+        with self._lock:
+            if len(target) < LOG_TRACKS:
+                target.append(entry)
+
+    def event(self, event):
+        """An event that went to the window."""
+        with self._lock:
+            if event.get("type") == "error":
+                self.message = self._clean(event.get("message", ""))
+            elif event.get("type") == "result":
+                self.result = {k: event[k] for k in ("saved", "failed", "total", "skipped")
+                               if isinstance(event.get(k), int)}
+
+    def tracker_failures(self, tracker):
+        """yt-dlp: on a playlist each failed item is one failure, by number."""
+        if not tracker.playlist:
+            return
+        seen = set()
+        with self._lock:
+            for err in tracker.errors:
+                if err["item"] in seen or len(self.failures) >= LOG_TRACKS:
+                    continue
+                seen.add(err["item"])
+                self.failures.append({"title": LOG_TEXT["track_n"].format(n=err["item"]),
+                                      "reason": err["message"], "detail": self._clean(err["line"])})
+
+    def snapshot(self):
+        with self._lock:
+            return {
+                "id": self.id, "url": self._clean(self.url), "format": self.format,
+                "source": self.source, "state": self.state, "message": self.message,
+                "result": dict(self.result) if self.result else None,
+                "failures": [dict(f) for f in self.failures],
+                "skipped": [dict(f) for f in self.skipped],
+                "errors": [dict(e) for e in self.errors],
+                "lines": list(self.lines), "dropped": self.dropped,
+            }
+
+
+download_logs = collections.OrderedDict()
+_logs_lock = threading.Lock()
+
+
+def remember_log(log):
+    with _logs_lock:
+        download_logs[log.id] = log
+        while len(download_logs) > LOG_KEEP:
+            download_logs.popitem(last=False)
+    return log
+
+
+def find_log(stream_id):
+    with _logs_lock:
+        return download_logs.get(stream_id)
 
 
 def load_config():
@@ -669,6 +815,7 @@ class Download:
         self.proc = None
         self.temp_dir = os.path.join(TEMP_DIR, f"run-{stream_id}")
         self.entry = {"id": stream_id, "url": url, "format": fmt, "status": "queued", "filename": ""}
+        self.log = remember_log(DownloadLog(stream_id, url, fmt, "deezer" if is_spotify else "yt-dlp"))
         self._counted = True            # begin_download() was called for it
 
     def emit(self, event):
@@ -682,6 +829,7 @@ class Download:
 
     def close(self, status):
         self.state = status
+        self.log.state = status
         self.entry["status"] = status
         self.release()
         self.events.put(f"__DONE__:{status}")
@@ -821,10 +969,17 @@ def run_download(item):
     """Run one queued download to the end, reporting into its stream."""
     q = item.events
     entry = item.entry
+    log = item.log
+    log.state = "running"
     proc = None
     workdir = None
     status = "error"
     entry["status"] = "downloading"
+
+    def send(event):
+        log.event(event)
+        q.put("__WAX__:" + json.dumps(event))
+
     try:
         os.makedirs(item.temp_dir, exist_ok=True)
         gofi = find_gofi() if item.is_spotify else None
@@ -861,16 +1016,22 @@ def run_download(item):
         tracker = None if item.is_spotify else YtdlpProgress(item.output_path, item.temp_dir)
         for line in proc.stdout:
             line = line.rstrip()
+            log.line(line)
             if item.is_spotify:
                 if line.startswith("WAX_EVENT:"):
                     event = gofi_event(line[len("WAX_EVENT:"):])
                     if event is not None:
+                        if event.get("type") == "track":
+                            log.track(event)  # for the details screen only
+                            continue
                         if event.get("type") == "result":
                             event.setdefault("folder", os.path.abspath(item.output_path))
-                        q.put("__WAX__:" + json.dumps(event))
+                        send(event)
                 continue
+            if line.startswith("ERROR:"):
+                log.error(friendly_error(line), line)
             for event in tracker.feed(line):
-                q.put("__WAX__:" + json.dumps(event))
+                send(event)
             if "Destination:" in line:
                 entry["filename"] = os.path.basename(line.split("Destination:", 1)[1].strip())
             elif "has already been downloaded" in line:
@@ -884,6 +1045,7 @@ def run_download(item):
             raise _Cancelled()
         ok = proc.returncode == 0
         if tracker is not None:
+            log.tracker_failures(tracker)
             events, ok = tracker.finish(proc.returncode)
             if not ok and tracker.outdated and update_after_failure(q):
                 events.insert(-1, {"type": "error", "message": UPDATED_MESSAGE})
@@ -893,14 +1055,16 @@ def run_download(item):
                     if not event["paths"]:  # nothing of it on disk: the page falls back to the output folder
                         event.pop("paths")
                         event.pop("folder", None)
-                q.put("__WAX__:" + json.dumps(event))
+                send(event)
         status = "done" if ok else "error"
     except _Cancelled:
         status = "cancelled"
     except Exception as e:
         status = "cancelled" if item.cancelled else "error"
         if status == "error":
-            q.put("__WAX__:" + json.dumps({"type": "error", "message": friendly_error(str(e))}))
+            log.line(f"wax: {e}")
+            log.error(friendly_error(str(e)), str(e))
+            send({"type": "error", "message": friendly_error(str(e))})
     finally:
         if proc is not None and proc.poll() is None:
             kill_tree(proc)
@@ -953,6 +1117,17 @@ def progress(stream_id):
 
     return Response(generate(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.route("/log/<int:stream_id>")
+def get_log(stream_id):
+    """The log of one of the last downloads (memory only, scrubbed)."""
+    log = find_log(stream_id)
+    if log is None:
+        return jsonify({"error": "no log for this download"}), 404
+    response = jsonify(log.snapshot())
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.route("/history")
@@ -1063,6 +1238,41 @@ def read_clipboard_text():
         if r.returncode == 0:
             return r.stdout[:4096].decode("utf-8", errors="replace")
     return ""
+
+
+CLIPBOARD_MAX = 1 << 20  # 1 MiB of text is plenty for a log
+
+
+def clipboard_write_commands(platform=None):
+    platform = platform or sys.platform
+    if platform == "darwin":
+        return [["/usr/bin/pbcopy"]]
+    if platform == "win32":
+        # the text comes on stdin, never on the command line
+        return [["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                 "[Console]::InputEncoding = [System.Text.Encoding]::UTF8; "
+                 "Set-Clipboard -Value ([Console]::In.ReadToEnd())"]]
+    return [["wl-copy"], ["xclip", "-selection", "clipboard", "-in"]]
+
+
+def write_clipboard_text(text, platform=None, run=subprocess.run):
+    """Put text on the system clipboard. True if a clipboard tool took it."""
+    if not isinstance(text, str):
+        return False
+    data = text[:CLIPBOARD_MAX].encode("utf-8")
+    for cmd in clipboard_write_commands(platform):
+        if not shutil.which(cmd[0]) and not os.path.isabs(cmd[0]):
+            continue
+        try:
+            kwargs = {"creationflags": CREATE_NO_WINDOW} if IS_WINDOWS else {}
+            # no pipes back: wl-copy / xclip stay behind to serve the clipboard
+            r = run(cmd, input=data, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    timeout=5, **kwargs)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if r.returncode == 0:
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -1179,6 +1389,10 @@ class Api:
     def clipboard_url(self):
         """The link on the clipboard if it holds exactly one, else ''."""
         return parse_clipboard_url(read_clipboard_text())
+
+    def copy_text(self, text):
+        """Copy text (the download log) to the clipboard. True if it worked."""
+        return write_clipboard_text(text)
 
     def open_url(self, url):
         if url.startswith(("http://", "https://")):
