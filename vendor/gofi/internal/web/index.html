@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>d-fi web</title>
+    <script>
+      try {
+        document.documentElement.dataset.theme =
+          localStorage.getItem("d-fi-theme") === "dark" ? "dark" : "light";
+      } catch (_) {}
+    </script>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>d-fi web</h1>
+      <div class="header-actions">
+        <button id="themeToggle" class="secondary" type="button">Dark</button>
+        <div class="status">
+          <span id="sessionDot" class="dot"></span
+          ><span id="sessionText">Loading</span>
+        </div>
+      </div>
+    </header>
+    <div id="toasts" class="toasts" aria-live="polite"></div>
+    <main>
+      <aside>
+        <h2>Session</h2>
+        <div class="arl-section">
+          <div class="settings-heading">
+            <div>
+              <div class="settings-title">Deezer ARL</div>
+              <div class="arl-meta">
+                <span id="arlDot" class="arl-dot"></span>
+                <span id="arlText">Checking ARL</span>
+              </div>
+            </div>
+            <button
+              id="toggleArlBtn"
+              class="secondary"
+              type="button"
+              aria-expanded="true"
+              aria-controls="arlBody"
+            >
+              Hide
+            </button>
+          </div>
+          <div id="arlBody">
+            <label for="arl">ARL value</label>
+            <input
+              id="arl"
+              type="text"
+              autocomplete="off"
+              placeholder="Paste ARL or leave blank to keep saved/env value"
+            />
+            <div class="toolbar">
+              <button id="saveArlBtn" class="secondary" disabled>
+                Save ARL
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="settings">
+          <div>
+            <div class="settings-heading">
+              <div class="settings-title">Downloads</div>
+              <button
+                id="saveDownloadsBtn"
+                class="secondary"
+                type="button"
+                disabled
+              >
+                Save
+              </button>
+            </div>
+            <label for="cfgConcurrency">Concurrency</label>
+            <input id="cfgConcurrency" type="number" min="1" />
+            <label class="check"
+              ><input id="cfgTrackNumber" type="checkbox" /> Add track
+              number</label
+            >
+            <label class="check"
+              ><input id="cfgFallbackTrack" type="checkbox" /> Use fallback
+              track</label
+            >
+            <label class="check"
+              ><input id="cfgFallbackQuality" type="checkbox" /> Use fallback
+              quality</label
+            >
+          </div>
+          <div>
+            <div class="settings-heading">
+              <div class="settings-title">Save Layout</div>
+              <div class="settings-actions">
+                <button id="layoutFieldsBtn" class="secondary" type="button">
+                  Fields
+                </button>
+                <button
+                  id="saveLayoutBtn"
+                  class="secondary"
+                  type="button"
+                  disabled
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+            <label for="cfgLayoutTrack">Track</label>
+            <input id="cfgLayoutTrack" />
+            <label for="cfgLayoutAlbum">Album</label>
+            <input id="cfgLayoutAlbum" />
+            <label for="cfgLayoutArtist">Artist</label>
+            <input id="cfgLayoutArtist" />
+            <label for="cfgLayoutPlaylist">Playlist</label>
+            <input id="cfgLayoutPlaylist" />
+          </div>
+          <div>
+            <div class="settings-heading">
+              <div class="settings-title">Playlist</div>
+              <button
+                id="savePlaylistBtn"
+                class="secondary"
+                type="button"
+                disabled
+              >
+                Save
+              </button>
+            </div>
+            <label class="check"
+              ><input id="cfgResolveFullPath" type="checkbox" /> Use absolute
+              paths in playlists</label
+            >
+          </div>
+          <div>
+            <div class="settings-heading">
+              <div class="settings-title">Cover</div>
+              <button
+                id="saveCoverBtn"
+                class="secondary"
+                type="button"
+                disabled
+              >
+                Save
+              </button>
+            </div>
+            <label for="cfgCoverMode">Mode</label>
+            <select id="cfgCoverMode">
+              <option value="embed">Embed in tracks</option>
+              <option value="file">Save image file only</option>
+              <option value="both">Embed and save image file</option>
+              <option value="none">No cover artwork</option>
+            </select>
+            <label for="cfgCoverFileName">File name</label>
+            <input id="cfgCoverFileName" placeholder="cover.jpg" disabled />
+            <div class="row">
+              <div>
+                <label for="cfgCover128">128</label>
+                <select id="cfgCover128"></select>
+              </div>
+              <div>
+                <label for="cfgCover320">320</label>
+                <select id="cfgCover320"></select>
+              </div>
+              <div>
+                <label for="cfgCoverFlac">FLAC</label>
+                <select id="cfgCoverFlac"></select>
+              </div>
+            </div>
+          </div>
+        </div>
+      </aside>
+      <div class="stack">
+        <section class="download-panel">
+          <h2>New Download</h2>
+          <label for="queryType">Source</label>
+          <select id="queryType">
+            <option value="auto">URL or track search</option>
+            <option value="artist">Artist search</option>
+            <option value="album">Album search</option>
+            <option value="playlist">Playlist search</option>
+          </select>
+          <label for="query">Query</label>
+          <div class="query-row">
+            <input
+              id="query"
+              placeholder="Paste a music URL or enter search text"
+            />
+            <button id="previewBtn">Preview</button>
+          </div>
+          <p id="mainMessage" class="muted"></p>
+          <div id="previewArea" class="preview-area" hidden>
+            <div id="optionsBox" class="option-list" hidden></div>
+            <div id="tracksBox" class="tracks" hidden>
+              <table>
+                <thead>
+                  <tr>
+                    <th class="col-select" style="width: 42px">
+                      <input
+                        id="selectAllTracks"
+                        type="checkbox"
+                        aria-label="Select all tracks"
+                        disabled
+                      />
+                    </th>
+                    <th class="col-position" style="width: 54px">#</th>
+                    <th>Title</th>
+                    <th>Artist</th>
+                    <th>Album</th>
+                    <th style="width: 72px">Time</th>
+                  </tr>
+                </thead>
+                <tbody id="tracksBody"></tbody>
+              </table>
+            </div>
+            <div id="trackRangeBox" class="track-range" hidden>
+              <label for="trackRange">Selection range</label>
+              <input
+                id="trackRange"
+                placeholder="Comma separated numbers, ranges, or blank for all"
+              />
+            </div>
+            <div id="previewActions" class="preview-actions" hidden>
+              <span id="selectionCount" class="selection-count"
+                >0 selected</span
+              >
+              <div class="download-actions">
+                <div class="download-quality">
+                  <label for="quality">Quality</label>
+                  <select id="quality">
+                    <option value="320">MP3 320</option>
+                    <option value="128">MP3 128</option>
+                    <option value="flac">FLAC</option>
+                  </select>
+                </div>
+                <button id="downloadSelectedBtn">Download Selected</button>
+              </div>
+            </div>
+          </div>
+        </section>
+        <section>
+          <div class="section-head">
+            <h2>Downloads</h2>
+            <button id="clearHistoryBtn" class="secondary" disabled>
+              Clear History
+            </button>
+          </div>
+          <div id="jobs"></div>
+        </section>
+      </div>
+    </main>
+    <dialog id="layoutFieldsDialog">
+      <div class="modal-head">
+        <h2>Save Layout Fields</h2>
+        <button id="closeLayoutFieldsBtn" class="secondary" type="button">
+          Close
+        </button>
+      </div>
+      <div class="modal-body">
+        <h2>Common Fields</h2>
+        <div id="alwaysFields" class="field-grid"></div>
+        <h2>Current Preview Fields</h2>
+        <p id="currentFieldsNote" class="muted"></p>
+        <div id="currentFields" class="field-grid"></div>
+      </div>
+      <div class="modal-foot">
+        <span class="muted">Click a field to copy it.</span>
+        <span id="layoutCopyStatus" class="modal-copy-status"></span>
+      </div>
+    </dialog>
+    <script src="/script.js"></script>
+  </body>
+</html>

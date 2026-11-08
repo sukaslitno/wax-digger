@@ -1,0 +1,83 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - revive
+    - misspell
+    - gosec
+    - testifylint
+    - modernize
+  settings:
+    errcheck:
+      exclude-functions:
+        - "(io.ReadCloser).Close"
+        - "(*os.File).Close"
+        - "os.Remove"
+        - "(*github.com/d-fi/GoFi/metaflac.Metaflac).SetTag"
+        - "(*github.com/d-fi/GoFi/metaflac.Metaflac).parseVorbisComment"
+        - "encoding/binary.Write"
+        - "fmt.Print"
+        - "fmt.Printf"
+        - "fmt.Println"
+        - "fmt.Fprint"
+        - "fmt.Fprintf"
+        - "fmt.Fprintln"
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+        - name: package-comments
+          disabled: true
+    staticcheck:
+      checks:
+        - all
+        - -SA1019
+        - -ST1000
+        - -ST1003
+  exclusions:
+    rules:
+      # A CLI music downloader intentionally reads and writes user-facing
+      # files with standard permissions. G300-G306 are server-oriented defaults.
+      - path: (.+)\.go$
+        linters:
+          - gosec
+        text: "G30[0-9]"
+      # Fixed-width binary serialization for FLAC metadata, sizes bounded
+      # by the FLAC format itself.
+      - path: (.+)\.go$
+        linters:
+          - gosec
+        text: "G115"
+      # Deezer's key derivation protocol requires MD5 by design.
+      - path: decrypt/
+        linters:
+          - gosec
+        text: "G401|G501"
+      # Filesystem paths come from user layout templates and pass through
+      # utils.SanitizeFileName, which strips / and \ components.
+      - path: (.+)\.go$
+        linters:
+          - gosec
+        text: "G703"
+      # errcheck is the primary unhandled-error gate. G104 duplicates it
+      # and cannot express exclude-function allowances.
+      - path: (.+)\.go$
+        linters:
+          - gosec
+        text: "G104"
+      # Test doubles echo request parameters back into responses. They are
+      # never rendered as HTML.
+      - path: _test\.go$
+        linters:
+          - gosec
+        text: "G705"
+
+formatters:
+  enable:
+    - gofmt

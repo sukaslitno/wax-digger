@@ -1,6 +1,6 @@
 {
   "name": "wax-digger-extension",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Browser extension for the local Wax Digger app — popup controls + a ↓ button on badger.greenlight.hr.",
   "author": "sukaslitno",
   "repository": {
