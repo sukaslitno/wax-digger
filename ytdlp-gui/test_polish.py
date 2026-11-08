@@ -119,6 +119,21 @@ class VersionTests(unittest.TestCase):
         self.assertIn("ytdlp_version", data)
 
 
+class RoundCornersTests(unittest.TestCase):
+    def test_region_math(self):
+        # 100% scale: window 600x432 -> region box one pixel past the edge, 128px corner diameter
+        self.assertEqual(wax.round_region_params(600, 432, 96), (601, 433, 128))
+        # 150% scale: a 900x648 physical window, corner diameter 192
+        self.assertEqual(wax.round_region_params(900, 648, 144), (901, 649, 192))
+        self.assertEqual(wax.round_region_params(1200, 864, 192), (1201, 865, 256))
+        self.assertEqual(wax.round_region_params(600, 260, 0), (601, 261, 128))  # unknown dpi -> 96
+
+    def test_never_touches_other_platforms(self):
+        if sys.platform != "win32":
+            self.assertFalse(wax.apply_round_corners(object()))
+            wax.schedule_round_corners(object())  # no-op, no threads, no errors
+
+
 class PageTests(unittest.TestCase):
     def test_copy_is_lowercase_and_new_states_exist(self):
         page = open(PAGE, encoding="utf-8").read()

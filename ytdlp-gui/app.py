@@ -1060,6 +1060,89 @@ def read_clipboard_text():
     return ""
 
 
+# ---------------------------------------------------------------------------
+# Windows has no transparent window here, so the modal's 64px corners would
+# show as black squares. The native window is clipped to a rounded rectangle
+# instead (SetWindowRgn works in physical pixels, hence the DPI math).
+# ---------------------------------------------------------------------------
+WINDOW_RADIUS = 64
+
+
+def round_region_params(width_px, height_px, dpi=96):
+    """(right, bottom, ellipse) for CreateRoundRectRgn(0, 0, right, bottom, ellipse, ellipse).
+
+    width/height are the window's physical size; the region API wants the
+    bottom-right corner one pixel past the edge, and the corner *diameter*.
+    """
+    scale = (dpi or 96) / 96.0
+    return int(width_px) + 1, int(height_px) + 1, max(2, round(2 * WINDOW_RADIUS * scale))
+
+
+def _window_handle(window):
+    """HWND of the pywebview window, or 0."""
+    import ctypes
+
+    try:
+        return int(window.native.Handle.ToInt64())  # WinForms form
+    except Exception:
+        pass
+    user32 = ctypes.windll.user32
+    found = []
+    pid = os.getpid()
+
+    @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+    def visit(hwnd, _):
+        owner = ctypes.c_ulong(0)
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+        buf = ctypes.create_unicode_buffer(8)
+        user32.GetWindowTextW(hwnd, buf, 8)
+        if owner.value == pid and buf.value == "WAX" and user32.IsWindowVisible(hwnd):
+            found.append(hwnd)
+        return True
+
+    user32.EnumWindows(visit, 0)
+    return found[0] if found else 0
+
+
+def apply_round_corners(window):
+    """Clip the window to a rounded rect. Windows only; never raises."""
+    if sys.platform != "win32" or window is None:
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        hwnd = _window_handle(window)
+        if not hwnd:
+            return False
+        user32, gdi32 = ctypes.windll.user32, ctypes.windll.gdi32
+        user32.SetWindowRgn.argtypes = [wintypes.HWND, wintypes.HRGN, wintypes.BOOL]
+        gdi32.CreateRoundRectRgn.restype = wintypes.HRGN
+        rect = wintypes.RECT()
+        if not user32.GetWindowRect(wintypes.HWND(hwnd), ctypes.byref(rect)):
+            return False
+        try:
+            dpi = user32.GetDpiForWindow(wintypes.HWND(hwnd))
+        except Exception:
+            dpi = 96
+        right, bottom, d = round_region_params(rect.right - rect.left, rect.bottom - rect.top, dpi)
+        region = gdi32.CreateRoundRectRgn(0, 0, right, bottom, d, d)
+        user32.SetWindowRgn(wintypes.HWND(hwnd), region, True)  # the window owns the region now
+        return True
+    except Exception:
+        return False
+
+
+def schedule_round_corners(window):
+    """After the window changed size: the native resize settles a moment later."""
+    if sys.platform != "win32":
+        return
+    for delay in (0.15, 0.6):
+        t = threading.Timer(delay, apply_round_corners, (window,))
+        t.daemon = True
+        t.start()
+
+
 QUIT_TITLE = "quit wax?"
 QUIT_MESSAGE = "a download is still running. quitting will stop it."
 
@@ -1082,6 +1165,7 @@ class Api:
         # The window is a fixed-width 600px modal; only its height follows the screen.
         if self.window:
             self.window.resize(WINDOW_WIDTH, int(height))
+            schedule_round_corners(self.window)
 
     def reveal(self, path):
         """Show a saved file (or folder) in Finder / Explorer. True if it was opened."""
@@ -1305,6 +1389,8 @@ def main():
         js_api=api,
     )
     api.window.events.closing += api.on_closing
+    if sys.platform == "win32":
+        api.window.events.shown += lambda: schedule_round_corners(api.window)
     api.menu_bar_ready = _install_menu_bar(api)
     webview.start()
 
