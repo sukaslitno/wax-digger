@@ -30,6 +30,17 @@ def main():
     assert call, "the UI never calls resize()"
     heights = {int(h) for h in re.findall(r"\d+", call.group(1))}
     assert {260, 336, 396, 432}.issubset(heights), f"unexpected window heights: {heights}"
+    # the details screen reuses the tallest main-screen height (432 + deezer row + status)
+    assert 558 in heights and max(heights) == 558, f"details screen height changed: {heights}"
+
+    # details screen: an in-window screen like info, closed by the corner (x) and Esc,
+    # every new string in one lookup for the coming translation
+    for marker in ('id="detailsScreen"', 'id="detailsSummary"', 'id="detailsLog"', 'id="copyBtn"',
+                   'id="statusMore"', "const T = {", '"/log/"', '"copy_text"'):
+        assert marker in page, f"missing {marker}"
+    assert 'class="btn btn--white btn--full" id="copyBtn"' in page, "copy must be the white button-large"
+    assert "if (info || details) { info = details = false;" in page, "Esc must close the details screen"
+    assert c.get("/log/999999").status_code == 404
 
     # the window is dragged by the modal backdrop only — easy_drag would hijack
     # every mouse drag and make the url/folder fields unselectable
@@ -45,7 +56,7 @@ def main():
     # window controls: markup on the page, actions on the bridge
     for marker in ('id="winTools"', 'id="winClose"', 'id="winMin"'):
         assert marker in page, f"missing {marker}"
-    for method in ("platform", "minimize", "quit", "reveal", "clipboard_url"):
+    for method in ("platform", "minimize", "quit", "reveal", "clipboard_url", "copy_text"):
         assert callable(getattr(wax.Api, method, None)), f"bridge lacks {method}()"
 
     # one download pass, one file left behind, one track per link

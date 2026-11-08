@@ -156,6 +156,24 @@ html, body {
 .info__text p { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .info__made { font-size: 14px; opacity: .24; }
 
+/* ===== details screen (what failed and why) ===== */
+.status-text[data-more="true"] { display: flex; justify-content: center; cursor: pointer; }
+.status-text[data-more="true"] span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-text[data-more="true"] span:last-child { flex-shrink: 0; white-space: pre; }
+.details { display: flex; flex-direction: column; gap: 12px; width: 536px; flex: 1; min-height: 0; }
+.details__summary { text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; }
+.details__scroll {
+  flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: none;
+  display: flex; flex-direction: column; gap: 12px;
+  -webkit-user-select: text; user-select: text;
+}
+.details__scroll::-webkit-scrollbar { display: none; }
+.details__tracks { display: flex; flex-direction: column; gap: 12px; }
+.details__tracks:empty { display: none; }
+.details__track p { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.details__reason, .details__log { font-size: 14px; opacity: .48; }
+.details__log { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 14px; }
+
 /* ===== window controls (frameless window has no titlebar) ===== */
 .wintools { position: absolute; top: 0; left: 0; right: 0; height: 48px; z-index: 15; }
 .wintools__bar {
@@ -243,7 +261,17 @@ html, body {
   </div>
 
   <button type="button" class="btn btn--yellow btn--full" id="actionBtn" hidden>grab the wax</button>
-  <p class="status-text" id="downloadStatus" role="status" aria-live="polite" hidden></p>
+  <p class="status-text" id="downloadStatus" role="status" aria-live="polite" hidden><span id="statusMsg"></span><span id="statusMore"></span></p>
+
+  <!-- ===== details screen: what failed and why, then the raw log ===== -->
+  <div class="details" id="detailsScreen" hidden>
+    <p class="details__summary" id="detailsSummary"></p>
+    <div class="details__scroll" id="detailsScroll">
+      <div class="details__tracks" id="detailsTracks"></div>
+      <pre class="details__log" id="detailsLog"></pre>
+    </div>
+  </div>
+  <button type="button" class="btn btn--white btn--full" id="copyBtn" hidden>copy</button>
 
   <!-- ===== info screen ===== -->
   <div class="info__text" id="infoText" hidden>
@@ -326,6 +354,20 @@ const ICON_CLOSE = `<svg viewBox="0 0 24 24" fill="none">
   <path d="M14.5 9.5L9.5 14.5M9.5 9.5L14.5 14.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
 </svg>`;
 
+// Every string the details screen adds, in one place for translation.
+const T = {
+  details: " · details",
+  copy: "copy",
+  copied: "copied",
+  copyFailed: "couldn't copy",
+  loading: "loading…",
+  gone: "the log of this download is gone",
+  saved: (saved, total) => `${saved} of ${total} saved`,
+  alreadyThere: (n) => `${n} already there`,
+  tracks: (n) => `${n} tracks`,
+  earlier: (n) => `… ${n} earlier lines`,
+};
+
 const FORMATS = [
   ["mp3_128", "mp3 128k"],
   ["mp3_320", "mp3 320k"],
@@ -341,12 +383,15 @@ const progressEl = el("progress"), urlInput = el("urlInput");
 let fmtIndex = 1;  // mp3 320k
 let phase = "idle";      // idle | busy | done | cancelled | error
 let info = false;
+let details = false;     // the details screen of the last failed download(s)
+let detailsLogs = null;  // their logs from the server, null while loading
+let copyTimer = 0;
 let urlInvalid = false;
 let addFailed = false;   // the server refused the link typed while busy
 // Links handed to the server, in its order; jobs[0] is the one running.
 // Format and folder were fixed for each when it was added.
 let jobs = [];
-let batch = null;        // tally of one busy stretch: {saved, failed, cancelled, total, error, result}
+let batch = null;        // tally of one busy stretch: {saved, failed, cancelled, total, error, result, failedIds}
 let posting = "";       // the link being handed to the server right now
 let lastHeight = 0;
 let doneTimer = 0;
@@ -407,18 +452,22 @@ function render() {
   if (spotify && fmtIndex > 2) fmtIndex = 0;
   el("fmtChip").textContent = FORMATS[fmtIndex][1];
 
-  el("mainScreen").hidden = info;
-  el("folderRow").hidden = info || !filled;
-  el("deezerRow").hidden = info || !hasUrl || !needsDeezer;
+  if (details && !hasDetails()) details = false;
+  const screen = info || details;  // a screen over the main one, closed by the corner (x)
+  el("mainScreen").hidden = screen;
+  el("folderRow").hidden = screen || !filled;
+  el("deezerRow").hidden = screen || !hasUrl || !needsDeezer;
   el("deezerArl").placeholder = deezerAvailable ? "deezer arl (change session)" : "deezer arl";
-  actionBtn.hidden = info || !filled || !hasFolder;
+  actionBtn.hidden = screen || !filled || !hasFolder;
   el("infoText").hidden = !info;
   el("infoRow").hidden = !info;
   el("infoMade").hidden = !info;
+  el("detailsScreen").hidden = !details;
+  el("copyBtn").hidden = !details;
 
-  el("cornerIcon").innerHTML = info ? ICON_CLOSE : ICON_INFO;
-  el("cornerBtn").classList.toggle("modal__corner--close", info);
-  el("cornerBtn").setAttribute("aria-label", info ? "close" : "info");
+  el("cornerIcon").innerHTML = screen ? ICON_CLOSE : ICON_INFO;
+  el("cornerBtn").classList.toggle("modal__corner--close", screen);
+  el("cornerBtn").setAttribute("aria-label", screen ? "close" : "info");
 
   urlInput.dataset.state = urlInvalid || addFailed ? "error" : "default";
   // the link field stays open for the next link; format and folder belong to
@@ -441,16 +490,21 @@ function render() {
   // a link that cannot work says why, until a download has something to report
   const drm = urlInvalid && phase !== "busy" ? drmMessage(drmName) : "";
   const status = drm || (statusMessage && queued > 0 ? `${statusMessage} · ${queued} queued` : statusMessage);
-  el("downloadStatus").hidden = info || !status;
-  el("downloadStatus").textContent = status;
+  // a failed or partial download offers its details right on the status line
+  const more = !drm && hasDetails();
+  el("downloadStatus").hidden = screen || !status;
+  el("statusMsg").textContent = status;
+  el("statusMore").textContent = more ? T.details : "";
+  el("downloadStatus").dataset.more = String(more);
+  el("downloadStatus").tabIndex = more ? 0 : -1;
   el("downloadStatus").dataset.error = String(!!drm || statusError);
   el("downloadStatus").dataset.clip = String(phase === "done");
   el("infoMade").textContent = ["made by jeneverbes", appVersion && "v" + appVersion,
     ytdlpVersion && "yt-dlp " + ytdlpVersion].filter(Boolean).join(" · ");
 
-  progressEl.hidden = info || phase === "idle";
+  progressEl.hidden = screen || phase === "idle";
 
-  resize(info ? 396 : (!filled ? 260 : !hasFolder ? 336 : 432) + (hasUrl && needsDeezer ? 76 : 0) + (status ? 50 : 0));
+  resize(details ? 558 : info ? 396 : (!filled ? 260 : !hasFolder ? 336 : 432) + (hasUrl && needsDeezer ? 76 : 0) + (status ? 50 : 0));
 }
 
 function setProgress(pct) {
@@ -519,7 +573,7 @@ async function enqueue() {
   if (first) {
     phase = "busy";
     jobs = [];
-    batch = { saved: 0, failed: 0, cancelled: 0, total: 0, error: "", result: null, folder: "" };
+    batch = { saved: 0, failed: 0, cancelled: 0, total: 0, error: "", result: null, folder: "", failedIds: [] };
     statusMessage = isSpotify(url) ? "connecting to deezer…" : "starting…";
     statusError = false;
     progressEl.dataset.state = "";
@@ -598,6 +652,7 @@ function finished(job, how, result, errorMessage) {
   else if (how === "cancelled") batch.cancelled++;
   else {
     batch.failed++;
+    batch.failedIds.push(job.id);
     // a playlist that saved some tracks reports how many, not the first error
     batch.error = result && result.saved > 0 ? savedText(result) : errorMessage;
   }
@@ -656,6 +711,7 @@ function cancelled() {
 
 function reset() {
   clearTimeout(doneTimer);
+  details = false;
   phase = "idle";
   jobs = [];
   statusMessage = "";
@@ -690,8 +746,125 @@ actionBtn.addEventListener("click", () => {
   if (phase === "idle" && !urlInvalid && isLikelyUrl(urlEl.value) && folderEl.value.trim()) enqueue();
 });
 
+// ===== details screen =====
+// Only after an error (a partial album counts) of a download the server ran.
+function hasDetails() {
+  return phase === "error" && !!batch && batch.failedIds.length > 0;
+}
+
+async function openDetails() {
+  if (!hasDetails()) return;
+  info = false;
+  details = true;
+  detailsLogs = null;
+  showDetails();
+  render();
+  const ids = batch.failedIds.slice();
+  const logs = await Promise.all(ids.map(async (id) => {
+    try {
+      const r = await fetch("/log/" + id);
+      return r.ok ? await r.json() : null;
+    } catch (e) { return null; }
+  }));
+  if (!details || ids.join() !== batch.failedIds.join()) return;  // closed or replaced meanwhile
+  detailsLogs = logs.filter(Boolean);
+  showDetails();
+}
+
+function trackName(t) {
+  if (!t.title && !t.artist && t.count) return T.tracks(t.count);
+  return t.artist && t.title ? `${t.artist} — ${t.title}` : t.title || t.artist || "";
+}
+
+// One summary line, then each track that failed (or was skipped) and why.
+function detailsModel() {
+  const logs = detailsLogs || [];
+  let summary = statusMessage;
+  if (logs.length === 1) {
+    const r = logs[0].result;
+    if (r && r.total > 1) {
+      summary = T.saved(r.saved, r.total) + (r.skipped ? ` · ${T.alreadyThere(r.skipped)}` : "");
+    } else if (logs[0].message) summary = logs[0].message;
+  }
+  const items = [];
+  for (const log of logs) {
+    const tracks = log.failures.concat(log.skipped);
+    // several links: one with no per-track list is named by its link
+    if (!tracks.length && logs.length > 1) items.push({ name: log.url, reason: log.message });
+    for (const t of tracks) items.push({ name: trackName(t), reason: t.reason, detail: t.detail || "" });
+  }
+  const lines = [];
+  for (const log of logs) {
+    if (logs.length > 1) lines.push(log.url);
+    if (log.dropped) lines.push(T.earlier(log.dropped));
+    lines.push(...log.lines);
+  }
+  return { summary, items, lines };
+}
+
+function showDetails() {
+  const tracks = el("detailsTracks");
+  tracks.textContent = "";
+  if (detailsLogs === null) {
+    el("detailsSummary").textContent = statusMessage;
+    el("detailsLog").textContent = T.loading;
+    return;
+  }
+  const m = detailsModel();
+  el("detailsSummary").textContent = m.summary;
+  for (const item of m.items) {
+    const row = document.createElement("div");
+    row.className = "details__track";
+    const name = document.createElement("p");
+    name.textContent = item.name;
+    name.title = item.name;
+    const reason = document.createElement("p");
+    reason.className = "details__reason";
+    reason.textContent = item.reason;
+    row.append(name, reason);
+    tracks.append(row);
+  }
+  el("detailsLog").textContent = detailsLogs.length ? m.lines.join("\n") : T.gone;
+  el("detailsScroll").scrollTop = 0;
+}
+
+// Plain text of the details for a bug report: versions, links, failures, log.
+function detailsText() {
+  const m = detailsModel();
+  const head = ["wax " + (appVersion || "?"), ytdlpVersion && "yt-dlp " + ytdlpVersion].filter(Boolean).join(" · ");
+  const links = (detailsLogs || []).map((l) => `${l.url} (${l.source}, ${l.format})`);
+  const items = m.items.map((i) => `${i.name}: ${i.reason}${i.detail ? ` (${i.detail})` : ""}`);
+  return [head, ...links, m.summary, "", ...items, items.length ? "" : null, ...m.lines]
+    .filter((l) => l !== null).join("\n");
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (e) {}
+  try { return !!(await api("copy_text", text)); } catch (e) { return false; }
+}
+
+el("downloadStatus").addEventListener("click", () => { if (hasDetails()) openDetails(); });
+el("downloadStatus").addEventListener("keydown", (e) => {
+  if ((e.key === "Enter" || e.key === " ") && hasDetails()) { e.preventDefault(); openDetails(); }
+});
+
+el("copyBtn").addEventListener("click", async () => {
+  const ok = await copyText(detailsText());
+  clearTimeout(copyTimer);
+  el("copyBtn").textContent = ok ? T.copied : T.copyFailed;
+  copyTimer = setTimeout(() => { el("copyBtn").textContent = T.copy; }, 1500);
+});
+
 // ===== info screen =====
-el("cornerBtn").addEventListener("click", () => { info = !info; if (info) loadStatus(); render(); });
+el("cornerBtn").addEventListener("click", () => {
+  if (details) { details = false; render(); return; }
+  info = !info;
+  if (info) loadStatus();
+  render();
+});
 
 el("infoRow").addEventListener("click", (e) => {
   const btn = e.target.closest("[data-link]");
@@ -703,7 +876,7 @@ el("infoRow").addEventListener("click", (e) => {
 
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
-  if (info) { info = false; render(); return; }
+  if (info || details) { info = details = false; render(); return; }
   api("close_window");
 });
 
@@ -756,6 +929,7 @@ urlEl.addEventListener("keydown", (e) => {
 // ===== a link from outside: dropped on the window, or waiting on the clipboard =====
 function setUrl(link) {
   info = false;
+  details = false;
   urlEl.value = link;
   handledLink = link;
   edited(); validate(); render();
@@ -833,6 +1007,7 @@ async function initTools() {
 window.addEventListener("pywebviewready", initTools);
 if (window.pywebview) initTools();  // in case the bridge landed before this ran
 
+el("copyBtn").textContent = T.copy;
 loadFolder();
 loadDeezer();
 loadStatus();
