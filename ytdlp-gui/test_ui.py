@@ -72,6 +72,14 @@ def main():
     assert child.wait(5) != 0, "Api.quit() left the child process running"
     wax.active_procs.discard(child)
 
+    # while busy the one action button cancels the running download or queues
+    # the next link; an unknown id is simply not cancelled
+    for marker in ('"/cancel/"', '"CANCEL"', '"ADD TO QUEUE"', '"cancelled"'):
+        assert marker in page, f"missing {marker}"
+    assert c.post("/cancel/999999").get_json() == {"cancelled": False}
+    assert callable(getattr(wax.Api, "on_closing", None)), "no closing-event handler"
+    assert "events.closing += api.on_closing" in src, "quitting must ask while downloads run"
+
     # a typed field is not a link until it parses as one
     assert "isLikelyUrl" in page, "url validation is missing"
 

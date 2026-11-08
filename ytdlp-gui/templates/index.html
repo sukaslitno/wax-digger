@@ -338,9 +338,15 @@ const urlEl = el("url"), folderEl = el("folder"), actionBtn = el("actionBtn");
 const progressEl = el("progress"), urlInput = el("urlInput");
 
 let fmtIndex = 0;
-let phase = "idle";      // idle | busy | done | error
+let phase = "idle";      // idle | busy | done | cancelled | error
 let info = false;
 let urlInvalid = false;
+let addFailed = false;   // the server refused the link typed while busy
+// Links handed to the server, in its order; jobs[0] is the one running.
+// Format and folder were fixed for each when it was added.
+let jobs = [];
+let batch = null;        // tally of one busy stretch: {saved, failed, cancelled, total, error, result}
+let posting = "";       // the link being handed to the server right now
 let lastHeight = 0;
 let doneTimer = 0;
 let deezerAvailable = false;
@@ -376,19 +382,30 @@ function isLikelyUrl(value) {
   } catch (e) { return false; }
 }
 
+// While busy the action button either adds the typed link to the queue or,
+// when there is nothing new in the field, cancels the running download.
+function busyAction() {
+  const v = urlEl.value.trim();
+  const fresh = isLikelyUrl(v) && !urlInvalid && v !== posting && !jobs.some((j) => j.url === v);
+  return fresh ? "add" : "cancel";
+}
+
 function render() {
   const hasUrl = isLikelyUrl(urlEl.value);
   const hasFolder = !!folderEl.value.trim();
   const spotify = isSpotify(urlEl.value);
   const needsDeezer = spotify && !deezerAvailable;
+  const action = phase === "busy" ? busyAction() : "";
+  // the filled screen stays while anything runs, even with the field emptied
+  const filled = hasUrl || phase !== "idle";
   if (spotify && fmtIndex > 2) fmtIndex = 0;
   el("fmtChip").textContent = FORMATS[fmtIndex][1];
 
   el("mainScreen").hidden = info;
-  el("folderRow").hidden = info || !hasUrl;
+  el("folderRow").hidden = info || !filled;
   el("deezerRow").hidden = info || !hasUrl || !needsDeezer;
   el("deezerArl").placeholder = deezerAvailable ? "Deezer ARL (change session)" : "Deezer ARL";
-  actionBtn.hidden = info || !hasUrl || !hasFolder;
+  actionBtn.hidden = info || !filled || !hasFolder;
   el("infoText").hidden = !info;
   el("infoRow").hidden = !info;
   el("infoMade").hidden = !info;
@@ -397,23 +414,32 @@ function render() {
   el("cornerBtn").classList.toggle("modal__corner--close", info);
   el("cornerBtn").setAttribute("aria-label", info ? "close" : "info");
 
-  urlInput.dataset.state = urlInvalid ? "error" : "default";
-  el("mainScreen").classList.toggle("locked", phase === "busy");
+  urlInput.dataset.state = urlInvalid || addFailed ? "error" : "default";
+  // the link field stays open for the next link; format and folder belong to
+  // the running download until a new link is typed, then to that one
+  const locked = action === "cancel" || phase === "done" || phase === "cancelled";
+  el("fmtChip").classList.toggle("locked", locked);
+  el("folderRow").classList.toggle("locked", locked);
   // pointer-events alone still leaves the focused field typeable
-  urlEl.readOnly = folderEl.readOnly = phase === "busy";
+  folderEl.readOnly = locked;
 
+  const waiting = phase === "done" || phase === "cancelled";
   actionBtn.className = "btn btn--full " +
-    (phase === "error" ? "btn--red" : phase === "busy" || phase === "done" ? "btn--white" : "btn--yellow");
+    (phase === "error" ? "btn--red" : waiting || action === "cancel" ? "btn--white" : "btn--yellow");
   actionBtn.textContent =
-    phase === "error" ? "ERROR" : (phase === "busy" || phase === "done") ? "WAIT" : "GRAB THE WAX";
-  actionBtn.disabled = phase === "busy" || phase === "done" || urlInvalid || needsDeezer;
-  el("downloadStatus").hidden = info || !statusMessage;
-  el("downloadStatus").textContent = statusMessage;
+    phase === "error" ? "ERROR" : waiting ? "WAIT" : action === "cancel" ? "CANCEL"
+    : action === "add" ? "ADD TO QUEUE" : "GRAB THE WAX";
+  actionBtn.disabled = waiting || !!posting ||
+    (action === "cancel" ? !jobs.length || jobs[0].cancelling : urlInvalid || needsDeezer);
+  const queued = phase === "busy" ? jobs.length - 1 : 0;
+  const status = statusMessage && queued > 0 ? `${statusMessage} · ${queued} queued` : statusMessage;
+  el("downloadStatus").hidden = info || !status;
+  el("downloadStatus").textContent = status;
   el("downloadStatus").dataset.error = String(statusError);
 
   progressEl.hidden = info || phase === "idle";
 
-  resize(info ? 396 : (!hasUrl ? 260 : !hasFolder ? 336 : 432) + (hasUrl && needsDeezer ? 76 : 0) + (statusMessage ? 50 : 0));
+  resize(info ? 396 : (!filled ? 260 : !hasFolder ? 336 : 432) + (hasUrl && needsDeezer ? 76 : 0) + (status ? 50 : 0));
 }
 
 function setProgress(pct) {
@@ -463,12 +489,21 @@ el("browseBtn").addEventListener("click", async () => {
 // status / progress {percent, message} / error {message} / result {saved, failed, total}.
 function savedText(r) { return `${r.saved} of ${r.total} saved`; }
 
-async function startDownload() {
-  phase = "busy";
-  statusMessage = isSpotify(urlEl.value) ? "connecting to deezer…" : "starting…";
-  statusError = false;
-  progressEl.dataset.state = "";
-  setProgress(0);
+// Hand the link in the field to the server. The first one starts a busy
+// stretch; while busy, each further one waits its turn there.
+async function enqueue() {
+  const url = urlEl.value.trim();
+  const first = phase !== "busy";
+  if (first) {
+    phase = "busy";
+    jobs = [];
+    batch = { saved: 0, failed: 0, cancelled: 0, total: 0, error: "", result: null };
+    statusMessage = isSpotify(url) ? "connecting to deezer…" : "starting…";
+    statusError = false;
+    progressEl.dataset.state = "";
+    setProgress(0);
+  }
+  posting = url;
   render();
 
   let stream_id, error;
@@ -476,33 +511,46 @@ async function startDownload() {
     const r = await fetch("/download", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        url: urlEl.value.trim(),
-        format: FORMATS[fmtIndex][0],
-        output_path: folderEl.value.trim(),
-      }),
+      body: JSON.stringify({ url, format: FORMATS[fmtIndex][0], output_path: folderEl.value.trim() }),
     });
     ({ stream_id, error } = await r.json());
   } catch (e) { error = String(e); }
+  posting = "";
 
-  if (error || !stream_id) { fail(error); return; }
+  if (error || !stream_id) {
+    if (first) { fail(error); return; }
+    // the running ones go on; the field shows this link could not be added
+    console.error("[wax]", error);
+    addFailed = true;
+    if (!jobs.length) settle();  // the running one ended while this was refused
+    else render();
+    return;
+  }
+  jobs.push({ id: stream_id, url });
+  if (!first && urlEl.value.trim() === url) { urlEl.value = ""; validate(); }
+  if (jobs.length === 1) follow(jobs[0]);
+  render();
+}
 
+// Read the running download's stream; when it ends, move on to the next one.
+function follow(job) {
+  statusMessage = isSpotify(job.url) ? "connecting to deezer…" : "starting…";
+  statusError = false;
+  setProgress(0);
   let result = null, errorMessage = "";
-  const es = new EventSource("/progress/" + stream_id);
+  const es = new EventSource("/progress/" + job.id);
   es.onmessage = (e) => {
     const data = e.data;
     if (data.startsWith("__DONE__:")) {
       es.close();
-      if (data.endsWith(":done")) succeed(result);
-      // a playlist that saved some tracks reports how many, not the first error
-      else fail(result && result.saved > 0 ? savedText(result) : errorMessage);
+      finished(job, data.slice(9), result, errorMessage);
       return;
     }
     if (!data.startsWith("__WAX__:")) return;
     try {
       const event = JSON.parse(data.slice(8));
-      if (event.type === "status" || event.type === "progress") statusMessage = event.message;
-      if (event.type === "progress") setProgress(event.percent);
+      if (!job.cancelling && (event.type === "status" || event.type === "progress")) statusMessage = event.message;
+      if (event.type === "progress" && !job.cancelling) setProgress(event.percent);
       if (event.type === "error") {
         errorMessage = event.message;
         if (event.message.startsWith("could not connect to deezer")) deezerAvailable = false;
@@ -511,21 +559,73 @@ async function startDownload() {
       render();
     } catch (e) {}
   };
-  es.onerror = () => { es.close(); if (phase === "busy") fail("lost the connection to wax"); };
+  es.onerror = () => {
+    es.close();
+    if (phase === "busy" && jobs[0] === job) { jobs = []; fail("lost the connection to wax"); }
+  };
 }
 
-function succeed(result) {
+function finished(job, how, result, errorMessage) {
+  if (jobs[0] !== job) return;
+  jobs.shift();
+  batch.total++;
+  if (how !== "cancelled") batch.result = result;
+  if (how === "done") batch.saved++;
+  else if (how === "cancelled") batch.cancelled++;
+  else {
+    batch.failed++;
+    // a playlist that saved some tracks reports how many, not the first error
+    batch.error = result && result.saved > 0 ? savedText(result) : errorMessage;
+  }
+  if (jobs.length) { follow(jobs[0]); render(); return; }
+  if (posting) { render(); return; }  // a link is on its way in; it picks up from here
+  settle();
+}
+
+// The queue is empty: sum up the busy stretch the way a single link did.
+function settle() {
+  const counted = batch.total - batch.cancelled;
+  if (counted === 0) { cancelled(); return; }
+  if (batch.failed === 0) succeed(counted === 1 ? batch.result : null, counted);
+  else if (counted === 1 || batch.saved === 0) fail(batch.error);
+  else fail(`${batch.saved} of ${counted} links saved`);
+}
+
+async function cancelCurrent() {
+  const job = jobs[0];
+  if (!job || job.cancelling) return;
+  job.cancelling = true;
+  statusMessage = "cancelling…";
+  statusError = false;
+  render();
+  try { await fetch("/cancel/" + job.id, { method: "POST" }); } catch (e) {}
+  // the stream itself ends with __DONE__:cancelled (or finished just before)
+}
+
+function succeed(result, links = 1) {
   phase = "done";
-  statusMessage = result && result.total > 1 ? savedText(result) : "saved";
+  statusMessage = links > 1 ? `${links} of ${links} links saved`
+    : result && result.total > 1 ? savedText(result) : "saved";
   setProgress(100);
   progressEl.dataset.state = "done";
   render();
   doneTimer = setTimeout(reset, 2000);
 }
 
+function cancelled() {
+  phase = "cancelled";
+  statusMessage = "cancelled";
+  statusError = false;
+  setProgress(0);
+  progressEl.dataset.state = "";
+  render();
+  doneTimer = setTimeout(reset, 1500);
+}
+
 function reset() {
   clearTimeout(doneTimer);
   phase = "idle";
+  jobs = [];
   statusMessage = "";
   statusError = false;
   progressEl.dataset.state = "";
@@ -543,8 +643,14 @@ function fail(reason) {
 }
 
 actionBtn.addEventListener("click", () => {
+  if (posting) return;
   if (phase === "error") { reset(); return; }
-  if (phase === "idle" && !urlInvalid && isLikelyUrl(urlEl.value) && folderEl.value.trim()) startDownload();
+  if (phase === "busy") {
+    if (busyAction() === "cancel") cancelCurrent();
+    else if (!urlInvalid && folderEl.value.trim()) enqueue();
+    return;
+  }
+  if (phase === "idle" && !urlInvalid && isLikelyUrl(urlEl.value) && folderEl.value.trim()) enqueue();
 });
 
 // ===== info screen =====
@@ -584,12 +690,18 @@ function validate() {
 }
 
 function edited() {
-  if (phase === "error" || phase === "done") reset();
+  addFailed = false;
+  if (phase === "error" || phase === "done" || phase === "cancelled") reset();
 }
 
 urlEl.addEventListener("input", () => { edited(); validate(); render(); });
 folderEl.addEventListener("input", () => { edited(); render(); });
-urlEl.addEventListener("keydown", (e) => { if (e.key === "Enter" && !actionBtn.disabled && !actionBtn.hidden) actionBtn.click(); });
+// Enter adds or grabs, but never cancels a download by accident
+urlEl.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" || actionBtn.disabled || actionBtn.hidden) return;
+  if (phase === "busy" && busyAction() === "cancel") return;
+  actionBtn.click();
+});
 
 // ===== window controls: hover near the top edge reveals close/minimize =====
 const winTools = el("winTools"), winBar = el("winBar");
