@@ -155,16 +155,23 @@ FORMATS = {
 # parts are computed into wax_* fields with --parse-metadata (each rule only
 # sets its fields when its regex matches; later rules override earlier ones)
 # and -o just glues them together:
-#   single track  -> <out>/Artist - Title.ext
-#   album         -> <out>/Artist - Album/01 Title.ext
-#   playlist      -> <out>/Playlist/01 Artist - Title.ext
+#   single track  -> <out>/Artist - Title [320].ext
+#   album         -> <out>/Album/001 - Artist - Title [320].ext
+#   playlist      -> <out>/Playlist/001 - Artist - Title [320].ext
+# This is the same layout the Spotify adapter (vendor/gofi/cmd/wax-gofi) uses,
+# so every link type lands the same way.
 # The folder only uses playlist-level fields, so every track of one link lands
 # in the same folder. yt-dlp sanitizes each field (":" "?" "/" … become
 # full-width look-alikes, valid on macOS and Windows) and on Windows also fixes
 # trailing dots/spaces and reserved names itself, so --windows-filenames (which
 # would mangle "Vol. 2..." on macOS too) is not passed.
 # ---------------------------------------------------------------------------
-OUTPUT_TEMPLATE = "%(wax_dir|.)s/%(wax_num&{} |)s%(wax_file)s.%(ext)s"
+# Quality tag in the file name, as the Spotify adapter writes it.
+QUALITY_TAGS = {"mp3_128": "128", "mp3_320": "320", "flac": "flac", "wav": "wav", "aac": "aac"}
+
+
+def output_template(fmt):
+    return "%(wax_dir|.)s/%(wax_num&{} - |)s%(wax_file)s [" + QUALITY_TAGS[fmt] + "].%(ext)s"
 
 _DASH = r"\s+[-–—]\s+"   # " - ", " – ", " — "
 NAMING_RULES = [
@@ -181,13 +188,11 @@ NAMING_RULES = [
     # (a folder needs a letter or digit, so a title like ".." cannot climb out)
     "%(playlist_index|)s\n%(playlist_title,playlist|)s"
     ":(?s)^\\d+\n(?P<wax_dir>[^\n]*\\w[^\n]*)$",
-    "%(playlist_index)02d:(?P<wax_num>\\d+)",
-    # an album (its tracks' album == the playlist title): "Artist - Album"
-    # folder, the album's own track numbers, and no artist in the file name
-    "%(playlist_index|)s\n%(playlist_title|)s\n%(album_artist,playlist_uploader,artist|)s - %(album|)s"
-    ":(?s)^\\d+\n(?P<wax_p>[^\n]+)\n(?P<wax_dir>[^\n]*\\w[^\n]* - (?P=wax_p))$",
-    "%(playlist_index|)s\n%(playlist_title|)s\n%(album|)s\n%(track_number)02d\n%(track,title)s"
-    ":(?s)^\\d+\n(?P<wax_p>[^\n]+)\n(?P=wax_p)\n(?P<wax_num>\\d+)\n(?P<wax_file>.+)$",
+    "%(playlist_index)03d:(?P<wax_num>\\d+)",
+    # an album (its tracks' album == the playlist title): number by the
+    # album's own track numbers instead of the position in the list
+    "%(playlist_index|)s\n%(playlist_title|)s\n%(album|)s\n%(track_number)03d"
+    ":(?s)^\\d+\n(?P<wax_p>[^\n]+)\n(?P=wax_p)\n(?P<wax_num>\\d+)$",
 ]
 
 # Tags on top of what --embed-metadata maps by itself (title, artist, album,
@@ -215,7 +220,7 @@ def build_ytdlp_command(url, fmt, output_path, ytdlp=None, ffmpeg_location=None,
         "--no-colors",
         "--ignore-config",       # a user's own yt-dlp config must not move files elsewhere
         "--no-abort-on-error",   # a dead track in a playlist skips, the rest still downloads
-        "-o", OUTPUT_TEMPLATE,
+        "-o", output_template(fmt),
         "-P", output_path,
         # each run gets its own temp dir, so a cancelled run's partial files
         # can be removed without touching anything else

@@ -19,6 +19,16 @@ Grab the files for your platform from the **[Releases](../../releases)** page:
 The desktop app bundles everything — no Python, yt-dlp, or ffmpeg to install.
 Run it — the WAX window opens on your desktop.
 
+Every link lands the same way, whatever the source:
+
+```
+Artist - Title [320].mp3                       # a single track
+Album/001 - Artist - Title [320].mp3           # an album
+Playlist/001 - Artist - Title [320].mp3        # a playlist
+```
+
+Tags and the cover are embedded in the files (WAV gets tags only).
+
 yt-dlp keeps itself up to date without a new app release: Wax copies the
 bundled yt-dlp into the user data dir (macOS `~/Library/Application
 Support/Wax Digger/bin`, Windows `%LOCALAPPDATA%\Wax Digger\bin`, Linux

@@ -57,7 +57,7 @@ def main():
                  "--embed-metadata", "--embed-thumbnail"):
         assert flag in cmd, f"yt-dlp command lost {flag}"
     assert cmd[-2:] == ["--", "https://example.com/a"], "the link must come after --"
-    assert cmd[cmd.index("-o") + 1] == wax.OUTPUT_TEMPLATE
+    assert cmd[cmd.index("-o") + 1] == wax.output_template("mp3_320")
     assert cmd[cmd.index("-P") + 1] == "/out"
     # WAV cannot carry a cover; asking for one would fail the download
     assert "--embed-thumbnail" not in wax.build_ytdlp_command("u", "wav", "/out", ytdlp=["y"])

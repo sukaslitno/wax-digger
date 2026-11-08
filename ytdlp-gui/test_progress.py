@@ -177,33 +177,38 @@ class StreamTests(unittest.TestCase):
 class NamingTests(unittest.TestCase):
     """Run the real --parse-metadata rules and -o template inside yt-dlp."""
 
-    def name(self, info):
-        cmd = wax.build_ytdlp_command("u", "mp3_320", "/out", ytdlp=[])
+    def name(self, info, fmt="mp3_320"):
+        cmd = wax.build_ytdlp_command("u", fmt, "/out", ytdlp=[])
         opts = yt_dlp.parse_options(cmd[:-2] + ["--quiet"]).ydl_opts
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.run_all_pps("pre_process", {"id": "x", "ext": "mp3", **info})
             return os.path.normpath(ydl.prepare_filename(info)).replace(os.sep, "/"), info
 
     def test_single_track(self):
-        self.assertEqual(self.name({"title": "Some Song", "uploader": "Chan"})[0], "/out/Chan - Some Song.mp3")
+        self.assertEqual(self.name({"title": "Some Song", "uploader": "Chan"})[0], "/out/Chan - Some Song [320].mp3")
 
     def test_title_already_has_the_artist(self):
         path, info = self.name({"title": "Rick Astley - Never Gonna Give You Up", "uploader": "Rick Astley"})
-        self.assertEqual(path, "/out/Rick Astley - Never Gonna Give You Up.mp3")
+        self.assertEqual(path, "/out/Rick Astley - Never Gonna Give You Up [320].mp3")
         self.assertEqual(info["meta_title"], "Never Gonna Give You Up")
 
     def test_album(self):
         path, _ = self.name({"title": "X - Entropy", "track": "Entropy", "artist": "X", "album": "E",
-                             "album_artist": "X", "track_number": 3, "playlist_index": 3, "playlist_title": "E"})
-        self.assertEqual(path, "/out/X - E/03 Entropy.mp3")
+                             "album_artist": "X", "track_number": 3, "playlist_index": 1, "playlist_title": "E"})
+        # same layout as the Spotify adapter: album folder, album track number
+        self.assertEqual(path, "/out/E/003 - X - Entropy [320].mp3")
 
     def test_playlist(self):
         path, _ = self.name({"title": "Song", "uploader": "U", "playlist_index": 7, "playlist_title": "My Mix"})
-        self.assertEqual(path, "/out/My Mix/07 U - Song.mp3")
+        self.assertEqual(path, "/out/My Mix/007 - U - Song [320].mp3")
+
+    def test_quality_tag_follows_the_format(self):
+        self.assertEqual(self.name({"title": "Some Song", "uploader": "Chan", "ext": "flac"}, "flac")[0],
+                         "/out/Chan - Some Song [flac].flac")
 
     def test_playlist_title_cannot_climb_out(self):
         path, _ = self.name({"title": "Song", "uploader": "U", "playlist_index": 7, "playlist_title": ".."})
-        self.assertEqual(path, "/out/07 U - Song.mp3")
+        self.assertEqual(path, "/out/007 - U - Song [320].mp3")
 
 
 if __name__ == "__main__":
