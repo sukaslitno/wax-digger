@@ -102,12 +102,26 @@ def find_gofi():
     return candidate if os.path.isfile(candidate) else None
 
 
-def spotify_link(url):
+def _link_host(url):
     try:
         parsed = urlsplit(url if "://" in url else "https://" + url)
-        return parsed.scheme in ("http", "https") and parsed.hostname in ("open.spotify.com", "www.open.spotify.com")
+        return parsed.hostname if parsed.scheme in ("http", "https") else None
     except ValueError:
-        return False
+        return None
+
+
+def spotify_link(url):
+    return _link_host(url) in ("open.spotify.com", "www.open.spotify.com")
+
+
+# Links that may be saved as video (shorts included). music.youtube.com is
+# left out on purpose: it is a music service, its tracks are mostly a still
+# cover over the song, so it stays audio-only like every other music site.
+YOUTUBE_VIDEO_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "www.youtu.be"}
+
+
+def youtube_video_link(url):
+    return _link_host(url) in YOUTUBE_VIDEO_HOSTS
 
 
 def existing_gofi_session():
@@ -151,6 +165,36 @@ FORMATS = {
 }
 
 # ---------------------------------------------------------------------------
+# Video (YouTube links only): video + sound in one .mp4, never re-encoded.
+# The quality is a cap: "-S res:N" takes the largest resolution not above N
+# and only falls back to the smallest one above it if nothing is that small,
+# so a missing exact height never fails the download. "res" is the shorter
+# side, so a vertical 1080x1920 short counts as 1080p, as YouTube labels it.
+# Up to 1080p H.264 + AAC is preferred: it plays in QuickTime and every other
+# player. YouTube has no H.264 above 1080p, so 1440p/2160p come as AV1 or
+# VP9 (still put in .mp4, which ffmpeg muxes without re-encoding; mkv would
+# open in even fewer players). AAC audio is preferred for the same reason.
+# ---------------------------------------------------------------------------
+VIDEO_FORMATS = {f"video_{h}": h for h in (360, 480, 720, 1080, 1440, 2160)}
+H264_MAX_HEIGHT = 1080
+
+
+def video_sort(height):
+    """The -S format sort of a video quality."""
+    fields = [f"res:{height}"]
+    if height <= H264_MAX_HEIGHT:
+        fields.append("vcodec:h264")
+    fields.append("acodec:aac")
+    return ",".join(fields)
+
+
+for _fmt, _height in VIDEO_FORMATS.items():
+    FORMATS[_fmt] = ["-f", "bv*+ba/b", "-S", video_sort(_height), "--merge-output-format", "mp4"]
+
+# Spotify links go to the Deezer adapter, which only has these.
+SPOTIFY_FORMATS = ("mp3_128", "mp3_320", "flac")
+
+# ---------------------------------------------------------------------------
 # File layout. yt-dlp has no "if this is a playlist" switch in -o, so the name
 # parts are computed into wax_* fields with --parse-metadata (each rule only
 # sets its fields when its regex matches; later rules override earlier ones)
@@ -171,7 +215,13 @@ QUALITY_TAGS = {"mp3_128": "128", "mp3_320": "320", "flac": "flac", "wav": "wav"
 
 
 def output_template(fmt):
-    return "%(wax_dir|.)s/%(wax_num&{} - |)s%(wax_file)s [" + QUALITY_TAGS[fmt] + "].%(ext)s"
+    if fmt in VIDEO_FORMATS:
+        # the height actually downloaded (wax_res, see VIDEO_RULES); the
+        # requested one only if yt-dlp does not know it
+        tag = "%(wax_res&{}p|" + f"{VIDEO_FORMATS[fmt]}p" + ")s"
+    else:
+        tag = QUALITY_TAGS[fmt]
+    return "%(wax_dir|.)s/%(wax_num&{} - |)s%(wax_file)s [" + tag + "].%(ext)s"
 
 _DASH = r"\s+[-–—]\s+"   # " - ", " – ", " — "
 NAMING_RULES = [
@@ -202,6 +252,13 @@ TAG_RULES = [
     "%(track_number,playlist_index|)s:%(meta_track)s",
 ]
 
+# Video quality tag: the downloaded format's shorter side, as YouTube labels
+# it (a 1080x1920 short is 1080p). Runs once the format is chosen ("video:").
+VIDEO_RULES = [
+    "video:%(height)s:^(?P<wax_res>\\d+)$",
+    "video:%(aspect_ratio)s %(width)s:^0\\.\\d+ (?P<wax_res>\\d+)$",  # taller than wide
+]
+
 # Center-crop covers to a square (YouTube thumbnails are 16:9). Only applies
 # when the thumbnail is actually converted (webp -> jpg); jpg covers from
 # Bandcamp/SoundCloud are already square and are left alone.
@@ -212,9 +269,12 @@ COVER_FORMATS = {"mp3_128", "mp3_320", "flac", "aac"}
 
 def build_ytdlp_command(url, fmt, output_path, ytdlp=None, ffmpeg_location=None, temp_dir=None):
     fmt = fmt if fmt in FORMATS else "mp3_320"
-    cmd = list(ytdlp if ytdlp is not None else ytdlp_manager.current()) + FORMATS[fmt] + [
+    video = fmt in VIDEO_FORMATS
+    cmd = list(ytdlp if ytdlp is not None else ytdlp_manager.current()) + FORMATS[fmt]
+    if not video:
         # one download pass (no separate video+audio + merge), one progress ramp
-        "-f", "bestaudio/best",
+        cmd += ["-f", "bestaudio/best"]
+    cmd += [
         "--newline",      # progress updates as lines, not \r-glued into one blob
         "--no-playlist",  # a track link with ?list= context is still one track
         "--no-colors",
@@ -227,10 +287,13 @@ def build_ytdlp_command(url, fmt, output_path, ytdlp=None, ffmpeg_location=None,
         "-P", f"temp:{temp_dir or TEMP_DIR}",
         "--embed-metadata",
     ]
-    for rule in NAMING_RULES + TAG_RULES:
+    for rule in NAMING_RULES + TAG_RULES + (VIDEO_RULES if video else []):
         cmd += ["--parse-metadata", rule]
     if fmt in COVER_FORMATS:
         cmd += ["--embed-thumbnail", "--convert-thumbnails", "jpg", "--ppa", SQUARE_COVER]
+    elif video:
+        # the thumbnail as the file's cover, kept 16:9 like the video
+        cmd += ["--embed-thumbnail", "--convert-thumbnails", "jpg"]
     if ffmpeg_location:
         cmd += ["--ffmpeg-location", ffmpeg_location]
     cmd += ["--", url]
@@ -325,15 +388,35 @@ _AUDIO_PATH_RE = re.compile(
 # share of a track's slice of the ring spent downloading; the rest is ffmpeg
 DOWNLOAD_SHARE = 0.9
 
+# Video: two streams, video first, then audio, then ffmpeg merges them. The
+# video stream is by far the bigger one, so it gets most of the download share.
+VIDEO_EXTENSIONS = {".mp4", ".mkv", ".webm", ".mov"}
+VIDEO_STREAM_SHARES = {1: (DOWNLOAD_SHARE,), 2: (0.75, DOWNLOAD_SHARE - 0.75)}
+_FORMATS_RE = re.compile(r"^\[info\] .+: Downloading \d+ format\(s\): (\S+)")
+_DESTINATION_RE = re.compile(r"^\[download\] Destination: ")
+_MERGE_RE = re.compile(r'^\[Merger\] Merging formats into "(.+)"$')
+_VIDEO_POST_RE = re.compile(r"^\[(Merger|Metadata|EmbedThumbnail|Fixup\w+|VideoRemuxer|VideoConvertor)\]")
+_VIDEO_PATH_RE = re.compile(r"^\[download\] (.+) has already been downloaded$")
+# a stream yt-dlp downloads before merging ("... [720p].f136.mp4"), never the result
+_PART_RE = re.compile(r"\.f[\w-]+\.\w+$")
+
+# status lines of a video download, lowercase like the rest of the UI copy
+VIDEO_TEXT = {
+    "video": "downloading video…",
+    "audio": "downloading audio…",
+    "merging": "merging…",
+}
+
 
 class YtdlpProgress:
     """Feed yt-dlp stdout lines, get UI events back.
 
     Progress is overall: on an album each track owns 1/M of the ring, so the
-    ring no longer hits 100% after the first file.
+    ring no longer hits 100% after the first file. A video item is two streams
+    and a merge; its slice is split between them (VIDEO_STREAM_SHARES).
     """
 
-    def __init__(self, output_path=None, temp_dir=None):
+    def __init__(self, output_path=None, temp_dir=None, video=False):
         # with an output folder given, the tracker also learns where the audio
         # files ended up (reported as paths in the result)
         self.output_path = os.path.abspath(output_path) if output_path else None
@@ -350,6 +433,9 @@ class YtdlpProgress:
         self.outdated = False   # an error suggests updating yt-dlp
         self.last_percent = -1.0
         self.last_message = None
+        self.video = video
+        self.streams = 1        # video: streams of the current item (2 = video + audio)
+        self.stream = -1        # video: the stream downloading now, 0-based
 
     def _overall(self):
         done = (self.index - 1) + self.file_pct / 100.0
@@ -359,6 +445,10 @@ class YtdlpProgress:
         if self.playlist:
             word = "converting" if converting else "track"
             return f"{word} {self.index} of {self.total}"
+        if self.video:
+            if converting:
+                return VIDEO_TEXT["merging"] if self.streams > 1 else "converting…"
+            return VIDEO_TEXT["audio"] if self.streams > 1 and self.stream >= 1 else VIDEO_TEXT["video"]
         return "converting…" if converting else "downloading…"
 
     def _progress(self, message):
@@ -373,7 +463,9 @@ class YtdlpProgress:
         if not self.output_path:
             return
         path = os.path.abspath(path.strip().strip("\"'"))
-        if os.path.splitext(path)[1].lower() not in AUDIO_EXTENSIONS:
+        if os.path.splitext(path)[1].lower() not in (VIDEO_EXTENSIONS if self.video else AUDIO_EXTENSIONS):
+            return
+        if self.video and _PART_RE.search(path):
             return
         if not moved and self.temp_dir and path.startswith(self.temp_dir + os.sep):
             # still in the run's temp dir: it moves to the same place under the output folder
@@ -387,6 +479,10 @@ class YtdlpProgress:
             m = _MOVED_RE.match(line)
             if m:
                 self._note_path(m.group(2), moved=True)
+            elif self.video:
+                m = _MERGE_RE.match(line) or _VIDEO_PATH_RE.match(line)
+                if m:
+                    self._note_path(m.group(1))
             else:
                 m = _AUDIO_PATH_RE.match(line)
                 if m:
@@ -396,6 +492,7 @@ class YtdlpProgress:
             self.playlist = True
             self.index, self.total = int(m.group(1)), max(1, int(m.group(2)))
             self.file_pct = 0.0
+            self.streams, self.stream = 1, -1
             return self._progress(self._label())
         if line.startswith("ERROR:"):
             self.failed.add(self.index)
@@ -408,6 +505,8 @@ class YtdlpProgress:
             if self.playlist:
                 return []  # yt-dlp moves on to the next item; reported in the result
             return [{"type": "error", "message": message}]
+        if self.video:
+            return self._feed_video(line)
         if _DONE_RE.search(line):
             self.finished.add(self.index)
         m = _PERCENT_RE.match(line)
@@ -419,6 +518,36 @@ class YtdlpProgress:
             self.file_pct = 100.0
             return self._progress(self._label())
         if _CONVERT_RE.match(line):
+            self.file_pct = max(self.file_pct, 100.0 * DOWNLOAD_SHARE)
+            return self._progress(self._label(converting=True))
+        return []
+
+    def _feed_video(self, line):
+        moved = _MOVED_RE.match(line)
+        if "has already been downloaded" in line or (
+                moved and not _PART_RE.search(moved.group(2))
+                and os.path.splitext(moved.group(2))[1].lower() in VIDEO_EXTENSIONS):
+            self.finished.add(self.index)  # the merged file is in the output folder
+        m = _FORMATS_RE.match(line)
+        if m:
+            self.streams = 2 if "+" in m.group(1) else 1
+            self.stream = -1
+            return []
+        shares = VIDEO_STREAM_SHARES[self.streams]
+        if _DESTINATION_RE.match(line):
+            self.stream = min(self.stream + 1, self.streams - 1)
+            self.file_pct = max(self.file_pct, 100.0 * sum(shares[:self.stream]))
+            return self._progress(self._label())
+        m = _PERCENT_RE.match(line)
+        if m:
+            k = max(0, self.stream)
+            pct = 100.0 * (sum(shares[:k]) + shares[k] * min(100.0, float(m.group(1))) / 100.0)
+            self.file_pct = max(self.file_pct, pct)
+            return self._progress(self._label())
+        if "has already been downloaded" in line:
+            self.file_pct = 100.0
+            return self._progress(self._label())
+        if _VIDEO_POST_RE.match(line):
             self.file_pct = max(self.file_pct, 100.0 * DOWNLOAD_SHARE)
             return self._progress(self._label(converting=True))
         return []
@@ -938,14 +1067,18 @@ def download():
     if not url:
         return jsonify({"error": "url is required"}), 400
 
+    if not isinstance(fmt, str) or fmt not in FORMATS:
+        return jsonify({"error": "unknown format"}), 400
     is_spotify = spotify_link(url)
     if is_spotify:
-        if fmt not in ("mp3_128", "mp3_320", "flac"):
+        if fmt not in SPOTIFY_FORMATS:
             return jsonify({"error": "deezer supports mp3 128k, mp3 320k and flac"}), 400
         if not find_gofi():
             return jsonify({"error": "deezer downloader is not installed in this build"}), 503
         if not deezer_arl:
             return jsonify({"error": "connect deezer first"}), 400
+    elif fmt in VIDEO_FORMATS and not youtube_video_link(url):
+        return jsonify({"error": "video is for youtube links only"}), 400
 
     # counted from the moment it is queued: an update must not swap yt-dlp
     # between now and when the worker picks the binary for it
@@ -1009,11 +1142,12 @@ def run_download(item):
             raise _Cancelled()
         if item.is_spotify:
             payload = {"url": item.url if "://" in item.url else "https://" + item.url,
-                       "quality": {"mp3_128": "128", "mp3_320": "320", "flac": "flac"}[item.fmt],
+                       "quality": QUALITY_TAGS[item.fmt],
                        "output": os.path.abspath(item.output_path), "arl": deezer_arl}
             json.dump(payload, proc.stdin)
             proc.stdin.close()
-        tracker = None if item.is_spotify else YtdlpProgress(item.output_path, item.temp_dir)
+        tracker = None if item.is_spotify else YtdlpProgress(
+            item.output_path, item.temp_dir, video=item.fmt in VIDEO_FORMATS)
         for line in proc.stdout:
             line = line.rstrip()
             log.line(line)
@@ -1032,7 +1166,10 @@ def run_download(item):
                 log.error(friendly_error(line), line)
             for event in tracker.feed(line):
                 send(event)
-            if "Destination:" in line:
+            merged = _MERGE_RE.match(line)
+            if merged:
+                entry["filename"] = os.path.basename(merged.group(1))
+            elif "Destination:" in line:
                 entry["filename"] = os.path.basename(line.split("Destination:", 1)[1].strip())
             elif "has already been downloaded" in line:
                 fname = line.split("]", 1)[-1].strip().split(" has already")[0].strip()
