@@ -903,12 +903,23 @@ def _port_in_use():
         return s.connect_ex((HOST, PORT)) == 0
 
 
+QUIT_TITLE = "quit wax?"
+QUIT_MESSAGE = "a download is still running. quitting will stop it."
+
+
+def quit_needs_confirmation(pending, confirmed=False, can_ask=True):
+    """Ask before quitting? Only while something is running or queued, once."""
+    return pending > 0 and not confirmed and can_ask
+
+
 class Api:
     """Bridge exposed to the UI as window.pywebview.api."""
 
     def __init__(self):
         self.window = None
         self.menu_bar_ready = False
+        self._quit_confirmed = False
+        self._asking = threading.Lock()
 
     def resize(self, height):
         # The window is a fixed-width 600px modal; only its height follows the screen.
@@ -934,7 +945,7 @@ class Api:
 
     def close_window(self):
         if self.window and self.menu_bar_ready:
-            self.window.hide()
+            self.window.hide()  # downloads keep running in the menu bar
         else:
             self.quit()
 
@@ -943,13 +954,55 @@ class Api:
         for p in list(active_procs):
             kill_tree(p)
 
+    def _needs_confirmation(self):
+        return quit_needs_confirmation(downloads.pending(), self._quit_confirmed, self.window is not None)
+
     def quit(self):
+        if self._needs_confirmation():
+            self._confirm_then_quit()
+        else:
+            self._quit_now()
+
+    def _quit_now(self):
+        self._quit_confirmed = True
         self.stop_downloads()
         if self.window:
             # destroy() straight from a js_api call hangs the app: pywebview's
             # bridge thread then waits forever for a return value the stopped
             # event loop can no longer deliver, and it is not a daemon thread.
             threading.Timer(0.1, self.window.destroy).start()
+
+    def _confirm_then_quit(self):
+        """Ask on a thread of its own and return at once.
+
+        The dialog is never opened from the GUI thread (the macOS menu, the
+        closing event) nor awaited by a js_api call: pywebview's Cocoa and GTK
+        dialogs post to the GUI loop and block until it answers, which on that
+        very loop would never happen.
+        """
+        if not self._asking.acquire(blocking=False):
+            return  # already asking
+
+        def ask():
+            try:
+                ok = self.window.create_confirmation_dialog(QUIT_TITLE, QUIT_MESSAGE)
+            except Exception:
+                ok = False
+            finally:
+                self._asking.release()
+            if ok:
+                self._quit_now()
+
+        threading.Thread(target=ask, daemon=True).start()
+
+    def on_closing(self):
+        """The window is about to close (Cmd+Q, Alt+F4, taskbar, destroy())."""
+        if self._needs_confirmation():
+            self._confirm_then_quit()
+            return False  # cancels this close; a confirmed quit closes again
+        self._quit_confirmed = True
+        self.stop_downloads()
+        return None
 
 
 def _open_external(url):
@@ -1022,7 +1075,7 @@ def _install_menu_bar(api):
                 api.close_window()
 
             def quitApp_(self, sender):
-                api.quit()
+                api.quit()  # asks first while downloads run; never blocks this thread
 
         icon_path = os.path.join(RES, "templates", "menu-bar-w.png")
         icon = NSImage.alloc().initWithContentsOfFile_(icon_path)
@@ -1086,7 +1139,7 @@ def main():
         background_color="#000000",
         js_api=api,
     )
-    api.window.events.closing += api.stop_downloads
+    api.window.events.closing += api.on_closing
     api.menu_bar_ready = _install_menu_bar(api)
     webview.start()
 

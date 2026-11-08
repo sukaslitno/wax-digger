@@ -1,4 +1,4 @@
-"""Download queue and cancel."""
+"""Download queue, cancel and the quit confirmation."""
 import json
 import os
 import subprocess
@@ -241,6 +241,87 @@ class CancelThroughServerTests(unittest.TestCase):
         self.assertEqual(self.stream(b)[-1], "__DONE__:done")
         self.assertEqual(self.log(), ["start https://example.com/one", "end https://example.com/one",
                                       "start https://example.com/two", "end https://example.com/two"])
+
+
+class QuitConfirmationTests(unittest.TestCase):
+    def test_decision(self):
+        ask = wax.quit_needs_confirmation
+        self.assertFalse(ask(0))
+        self.assertTrue(ask(1))
+        self.assertTrue(ask(3))
+        self.assertFalse(ask(1, confirmed=True), "asked once, not again on the second close")
+        self.assertFalse(ask(1, can_ask=False), "no window to ask in")
+
+    def test_copy_is_lowercase(self):
+        for text in (wax.QUIT_TITLE, wax.QUIT_MESSAGE):
+            self.assertEqual(text, text.lower())
+
+    def api(self, answer):
+        api = wax.Api()
+        api.window = Mock()
+        asked = threading.Event()
+
+        def dialog(title, message):
+            asked.set()
+            return answer
+
+        api.window.create_confirmation_dialog.side_effect = dialog
+        return api, asked
+
+    def test_idle_quit_does_not_ask(self):
+        api, asked = self.api(True)
+        with patch.object(wax.downloads, "pending", return_value=0), \
+                patch.object(wax.downloads, "cancel_all"):
+            api.quit()
+            self.assertIsNone(api.on_closing(), "nothing running: let it close")
+        time.sleep(0.3)
+        self.assertFalse(asked.is_set())
+        api.window.destroy.assert_called_once()
+
+    def test_declined_quit_keeps_running(self):
+        api, asked = self.api(False)
+        with patch.object(wax.downloads, "pending", return_value=1), \
+                patch.object(wax.downloads, "cancel_all") as cancel_all:
+            self.assertIs(api.on_closing(), False, "the close must wait for the answer")
+            self.assertTrue(asked.wait(2))
+            time.sleep(0.3)
+        cancel_all.assert_not_called()
+        api.window.destroy.assert_not_called()
+        api.window.create_confirmation_dialog.assert_called_once_with("quit wax?", wax.QUIT_MESSAGE)
+
+    def test_confirmed_quit_stops_and_closes(self):
+        api, asked = self.api(True)
+        with patch.object(wax.downloads, "pending", return_value=2), \
+                patch.object(wax.downloads, "cancel_all") as cancel_all:
+            api.quit()  # returns at once: the dialog is on its own thread
+            self.assertTrue(asked.wait(2))
+            time.sleep(0.3)
+            cancel_all.assert_called()
+            api.window.destroy.assert_called_once()
+            # destroy() closes the window again; that close goes through
+            self.assertIsNone(api.on_closing())
+
+    def test_one_dialog_at_a_time(self):
+        api = wax.Api()
+        api.window = Mock()
+        release = threading.Event()
+        api.window.create_confirmation_dialog.side_effect = lambda t, m: release.wait(2) and False
+        with patch.object(wax.downloads, "pending", return_value=1):
+            api.quit()
+            api.quit()
+            api.on_closing()
+            time.sleep(0.2)
+            release.set()
+        self.assertEqual(api.window.create_confirmation_dialog.call_count, 1)
+
+    def test_quit_never_blocks_the_caller(self):
+        api = wax.Api()
+        api.window = Mock()
+        api.window.create_confirmation_dialog.side_effect = lambda t, m: time.sleep(1) or False
+        with patch.object(wax.downloads, "pending", return_value=1):
+            start = time.time()
+            api.quit()
+            self.assertLess(time.time() - start, 0.2)
 
 
 if __name__ == "__main__":
