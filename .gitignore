@@ -1,10 +1,3 @@
-# build output
-ytdlp-extension/dist/
-**/node_modules/
-**/web-ext-artifacts/
-*.zip
-*.xpi
-
 # native app build (PyInstaller + fetched binaries + generated icons)
 build/
 dist/
