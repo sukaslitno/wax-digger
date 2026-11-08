@@ -217,7 +217,7 @@ html, body {
         </svg>
       </span>
       <input id="url" type="text" placeholder="paste a track / album / playlist link" autocomplete="off" spellcheck="false">
-      <button type="button" class="btn btn--white input__chip" id="fmtChip">MP3 128K</button>
+      <button type="button" class="btn btn--white input__chip" id="fmtChip">mp3 128k</button>
     </label>
 
     <div class="row" id="folderRow" hidden>
@@ -235,18 +235,18 @@ html, body {
     </div>
     <div class="row" id="deezerRow" hidden>
       <label class="input" id="deezerInput">
-        <input id="deezerArl" type="password" placeholder="Deezer ARL" aria-label="Deezer ARL" autocomplete="off" spellcheck="false">
+        <input id="deezerArl" type="password" placeholder="deezer arl" aria-label="deezer arl" autocomplete="off" spellcheck="false">
       </label>
       <button type="button" class="btn btn--white" id="connectDeezer">connect</button>
     </div>
   </div>
 
-  <button type="button" class="btn btn--yellow btn--full" id="actionBtn" hidden>GRAB THE WAX</button>
+  <button type="button" class="btn btn--yellow btn--full" id="actionBtn" hidden>grab the wax</button>
   <p class="status-text" id="downloadStatus" role="status" aria-live="polite" hidden></p>
 
   <!-- ===== info screen ===== -->
   <div class="info__text" id="infoText" hidden>
-    <p>thanks for using WAX! luv y'all &lt;3</p>
+    <p>thanks for using wax! luv y'all &lt;3</p>
     <p>here u can find other links for my projects:</p>
   </div>
   <div class="row row--info" id="infoRow" hidden>
@@ -326,18 +326,18 @@ const ICON_CLOSE = `<svg viewBox="0 0 24 24" fill="none">
 </svg>`;
 
 const FORMATS = [
-  ["mp3_128", "MP3 128K"],
-  ["mp3_320", "MP3 320K"],
-  ["flac", "FLAC"],
-  ["wav", "WAV"],
-  ["aac", "AAC"],
+  ["mp3_128", "mp3 128k"],
+  ["mp3_320", "mp3 320k"],
+  ["flac", "flac"],
+  ["wav", "wav"],
+  ["aac", "aac"],
 ];
 
 const el = (id) => document.getElementById(id);
 const urlEl = el("url"), folderEl = el("folder"), actionBtn = el("actionBtn");
 const progressEl = el("progress"), urlInput = el("urlInput");
 
-let fmtIndex = 0;
+let fmtIndex = 1;  // mp3 320k
 let phase = "idle";      // idle | busy | done | cancelled | error
 let info = false;
 let urlInvalid = false;
@@ -404,7 +404,7 @@ function render() {
   el("mainScreen").hidden = info;
   el("folderRow").hidden = info || !filled;
   el("deezerRow").hidden = info || !hasUrl || !needsDeezer;
-  el("deezerArl").placeholder = deezerAvailable ? "Deezer ARL (change session)" : "Deezer ARL";
+  el("deezerArl").placeholder = deezerAvailable ? "deezer arl (change session)" : "deezer arl";
   actionBtn.hidden = info || !filled || !hasFolder;
   el("infoText").hidden = !info;
   el("infoRow").hidden = !info;
@@ -427,8 +427,8 @@ function render() {
   actionBtn.className = "btn btn--full " +
     (phase === "error" ? "btn--red" : waiting || action === "cancel" ? "btn--white" : "btn--yellow");
   actionBtn.textContent =
-    phase === "error" ? "ERROR" : waiting ? "WAIT" : action === "cancel" ? "CANCEL"
-    : action === "add" ? "ADD TO QUEUE" : "GRAB THE WAX";
+    phase === "error" ? "error" : waiting ? "wait" : action === "cancel" ? "cancel"
+    : action === "add" ? "add to queue" : "grab the wax";
   actionBtn.disabled = waiting || !!posting ||
     (action === "cancel" ? !jobs.length || jobs[0].cancelling : urlInvalid || needsDeezer);
   const queued = phase === "busy" ? jobs.length - 1 : 0;
@@ -472,7 +472,7 @@ el("connectDeezer").addEventListener("click", async () => {
     if (!response.ok) throw new Error(data.error);
     deezerAvailable = true;
     el("deezerArl").value = "";
-    statusMessage = "Deezer session added for this launch";
+    statusMessage = "deezer session added for this launch";
     statusError = false;
   } catch (e) { statusMessage = e.message; statusError = true; }
   render();

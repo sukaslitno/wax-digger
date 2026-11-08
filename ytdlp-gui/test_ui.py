@@ -74,7 +74,7 @@ def main():
 
     # while busy the one action button cancels the running download or queues
     # the next link; an unknown id is simply not cancelled
-    for marker in ('"/cancel/"', '"CANCEL"', '"ADD TO QUEUE"', '"cancelled"'):
+    for marker in ('"/cancel/"', '"cancel"', '"add to queue"', '"cancelled"'):
         assert marker in page, f"missing {marker}"
     assert c.post("/cancel/999999").get_json() == {"cancelled": False}
     assert callable(getattr(wax.Api, "on_closing", None)), "no closing-event handler"

@@ -475,10 +475,10 @@ ALLOWED_ORIGINS = {URL, f"http://localhost:{PORT}"}
 @app.before_request
 def only_local_window():
     if request.host not in ALLOWED_HOSTS:
-        return jsonify({"error": "Host not allowed"}), 403
+        return jsonify({"error": "host not allowed"}), 403
     origin = request.headers.get("Origin")
     if origin is not None and origin not in ALLOWED_ORIGINS:
-        return jsonify({"error": "Origin not allowed"}), 403
+        return jsonify({"error": "origin not allowed"}), 403
     return None
 
 
@@ -527,7 +527,7 @@ def deezer_session():
     if request.method == "POST":
         value = (request.get_json(silent=True) or {}).get("arl", "")
         if not isinstance(value, str) or len(value.strip()) != 192:
-            return jsonify({"error": "ARL must be 192 characters"}), 400
+            return jsonify({"error": "arl must be 192 characters"}), 400
         deezer_arl = value.strip()
     return jsonify({"available": bool(deezer_arl)})
 
@@ -732,16 +732,16 @@ def download():
     output_path = os.path.expanduser(output_path)
 
     if not url:
-        return jsonify({"error": "URL is required"}), 400
+        return jsonify({"error": "url is required"}), 400
 
     is_spotify = spotify_link(url)
     if is_spotify:
         if fmt not in ("mp3_128", "mp3_320", "flac"):
-            return jsonify({"error": "Deezer supports MP3 128, MP3 320 and FLAC"}), 400
+            return jsonify({"error": "deezer supports mp3 128k, mp3 320k and flac"}), 400
         if not find_gofi():
-            return jsonify({"error": "Deezer downloader is not installed in this build"}), 503
+            return jsonify({"error": "deezer downloader is not installed in this build"}), 503
         if not deezer_arl:
-            return jsonify({"error": "Connect Deezer first"}), 400
+            return jsonify({"error": "connect deezer first"}), 400
 
     # counted from the moment it is queued: an update must not swap yt-dlp
     # between now and when the worker picks the binary for it
@@ -774,7 +774,7 @@ def run_download(item):
         gofi = find_gofi() if item.is_spotify else None
         if item.is_spotify:
             if not gofi:
-                raise RuntimeError("Deezer downloader is not installed in this build")
+                raise RuntimeError("deezer downloader is not installed in this build")
             workdir = tempfile.TemporaryDirectory(prefix="wax-gofi-")
             child_cmd = [gofi]
         else:
