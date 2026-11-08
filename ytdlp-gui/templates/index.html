@@ -459,9 +459,13 @@ el("browseBtn").addEventListener("click", async () => {
 });
 
 // ===== download =====
+// The server turns both yt-dlp and the Deezer adapter into the same events:
+// status / progress {percent, message} / error {message} / result {saved, failed, total}.
+function savedText(r) { return `${r.saved} of ${r.total} saved`; }
+
 async function startDownload() {
   phase = "busy";
-  statusMessage = isSpotify(urlEl.value) ? "Connecting to Deezer…" : "";
+  statusMessage = isSpotify(urlEl.value) ? "connecting to deezer…" : "starting…";
   statusError = false;
   progressEl.dataset.state = "";
   setProgress(0);
@@ -483,43 +487,36 @@ async function startDownload() {
 
   if (error || !stream_id) { fail(error); return; }
 
-  let pct = 0;
-  let waxResult = null;
+  let result = null, errorMessage = "";
   const es = new EventSource("/progress/" + stream_id);
   es.onmessage = (e) => {
     const data = e.data;
     if (data.startsWith("__DONE__:")) {
       es.close();
-      if (data.endsWith(":done")) succeed();
-      else fail(waxResult || statusMessage || "Download failed");
+      if (data.endsWith(":done")) succeed(result);
+      // a playlist that saved some tracks reports how many, not the first error
+      else fail(result && result.saved > 0 ? savedText(result) : errorMessage);
       return;
     }
-    if (data.startsWith("__WAX__:")) {
-      try {
-        const event = JSON.parse(data.slice(8));
-        if (event.type === "status" || event.type === "progress") statusMessage = event.message;
-        if (event.type === "progress") setProgress(event.percent);
-        if (event.type === "error") {
-          waxResult = event.message;
-          if (event.message.startsWith("Could not connect to Deezer")) deezerAvailable = false;
-        }
-        if (event.type === "result") waxResult = `${event.saved} of ${event.total} saved; ${event.failed} not saved`;
-        render();
-      } catch (e) {}
-      return;
-    }
-    if (!data.trim()) return;
-    // several updates can arrive glued together; the last one is the current %
-    const m = [...data.matchAll(/\[download\]\s+([\d.]+)%/g)].at(-1);
-    if (m) { pct = Math.max(pct, parseFloat(m[1])); setProgress(pct); return; }
-    if (/^ERROR/i.test(data)) { es.close(); fail(data); }
+    if (!data.startsWith("__WAX__:")) return;
+    try {
+      const event = JSON.parse(data.slice(8));
+      if (event.type === "status" || event.type === "progress") statusMessage = event.message;
+      if (event.type === "progress") setProgress(event.percent);
+      if (event.type === "error") {
+        errorMessage = event.message;
+        if (event.message.startsWith("could not connect to deezer")) deezerAvailable = false;
+      }
+      if (event.type === "result") result = event;
+      render();
+    } catch (e) {}
   };
-  es.onerror = () => { es.close(); if (phase === "busy") fail("stream closed"); };
+  es.onerror = () => { es.close(); if (phase === "busy") fail("lost the connection to wax"); };
 }
 
-function succeed() {
+function succeed(result) {
   phase = "done";
-  if (isSpotify(urlEl.value)) statusMessage = "Download complete";
+  statusMessage = result && result.total > 1 ? savedText(result) : "saved";
   setProgress(100);
   progressEl.dataset.state = "done";
   render();
@@ -539,7 +536,7 @@ function reset() {
 function fail(reason) {
   if (reason) console.error("[wax]", reason);
   phase = "error";
-  statusMessage = reason || "Download failed";
+  statusMessage = reason || "couldn't grab this one";
   statusError = true;
   progressEl.dataset.state = "error";
   render();

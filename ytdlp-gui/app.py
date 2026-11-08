@@ -2,6 +2,7 @@ import itertools
 import json
 import os
 import queue
+import re
 import shutil
 import socket
 import subprocess
@@ -223,6 +224,167 @@ def build_ytdlp_command(url, fmt, output_path, ytdlp=None, ffmpeg_location=None)
     return cmd
 
 
+# ---------------------------------------------------------------------------
+# yt-dlp output -> the same __WAX__ events the Spotify adapter emits.
+# ---------------------------------------------------------------------------
+ERROR_MESSAGES = [
+    # order matters: specific causes before broad ones like "unable to download"
+    (("drm",), "this one is drm-protected"),
+    (("http error 429", "too many requests", "rate-limit", "rate limit"),
+     "too many requests, try again later"),
+    (("ffmpeg not found", "ffprobe and ffmpeg not found", "ffmpeg is not installed",
+      "ffmpeg could not be found"), "ffmpeg is missing"),
+    (("private video", "this video is private", "is private", "private track", "private playlist"),
+     "this one is private"),
+    (("confirm your age", "age-restricted", "age restricted", "inappropriate for some users"),
+     "this one is age-restricted"),
+    (("not a bot",), "youtube wants a sign-in, try again later"),
+    (("not available in your country", "not made this video available in your country",
+      "blocked it in your country", "geo restrict", "geo-restrict", "geoblock", "your location"),
+     "not available in your country"),
+    (("sign in", "log in", "login required", "logged-in", "members-only", "join this channel",
+      "requires authentication", "account cookies", "premium"),
+     "this one needs a sign-in"),
+    (("live event will begin", "premieres in", "is not yet available", "this live stream"),
+     "this stream hasn't started yet"),
+    (("unsupported url", "is not a valid url", "no suitable extractor"), "this link isn't supported"),
+    (("video unavailable", "has been removed", "been terminated", "no longer available",
+      "does not exist", "not found", "http error 404", "http error 410", "copyright",
+      "is unavailable", "not available", "this track was deleted"),
+     "this one is gone or unavailable"),
+    (("http error 403", "forbidden"), "the site refused the download, try again later"),
+    (("failed to resolve", "getaddrinfo", "name or service not known", "nodename nor servname",
+      "temporary failure in name resolution", "no address associated", "network is unreachable",
+      "connection refused", "connection reset", "timed out", "unable to connect",
+      "no route to host", "urlopen error", "errno 8", "errno 11001", "remote end closed",
+      "ssl", "unable to download webpage"),
+     "no connection, check your internet"),
+    (("no space left", "disk full"), "the disk is full"),
+    (("permission denied", "read-only file system", "access is denied"), "can't write to that folder"),
+]
+GENERIC_ERROR = "couldn't grab this one"
+
+
+def friendly_error(line):
+    """Turn a raw yt-dlp ERROR line into a short lowercase message for the UI."""
+    text = (line or "").lower()
+    for needles, message in ERROR_MESSAGES:
+        if any(n in text for n in needles):
+            return message
+    return GENERIC_ERROR
+
+
+_ITEM_RE = re.compile(r"^\[download\] Downloading item (\d+) of (\d+)")
+_PERCENT_RE = re.compile(r"^\[download\]\s+([\d.]+)%")
+_CONVERT_RE = re.compile(r"^\[(ExtractAudio|Metadata|EmbedThumbnail|FixupM4a|FixupM3u8)\]")
+# the audio file of the current item is on disk (converted, or kept as is)
+_DONE_RE = re.compile(r"^\[ExtractAudio\] (Destination: |Not converting audio)|has already been downloaded")
+
+# share of a track's slice of the ring spent downloading; the rest is ffmpeg
+DOWNLOAD_SHARE = 0.9
+
+
+class YtdlpProgress:
+    """Feed yt-dlp stdout lines, get UI events back.
+
+    Progress is overall: on an album each track owns 1/M of the ring, so the
+    ring no longer hits 100% after the first file.
+    """
+
+    def __init__(self):
+        self.index = 1          # current item, 1-based
+        self.total = 1          # items in the link (1 for a single track)
+        self.playlist = False
+        self.file_pct = 0.0     # 0..100 within the current item
+        self.failed = set()     # items that hit an ERROR
+        self.finished = set()   # items whose audio file was written
+        self.first_error = ""
+        self.last_percent = -1.0
+        self.last_message = None
+
+    def _overall(self):
+        done = (self.index - 1) + self.file_pct / 100.0
+        return round(min(100.0, 100.0 * done / max(1, self.total)), 1)
+
+    def _label(self, converting=False):
+        if self.playlist:
+            word = "converting" if converting else "track"
+            return f"{word} {self.index} of {self.total}"
+        return "converting…" if converting else "downloading…"
+
+    def _progress(self, message):
+        percent = self._overall()
+        if percent == self.last_percent and message == self.last_message:
+            return []
+        self.last_percent, self.last_message = percent, message
+        return [{"type": "progress", "percent": percent, "message": message}]
+
+    def feed(self, line):
+        line = line.strip()
+        m = _ITEM_RE.match(line)
+        if m:
+            self.playlist = True
+            self.index, self.total = int(m.group(1)), max(1, int(m.group(2)))
+            self.file_pct = 0.0
+            return self._progress(self._label())
+        if line.startswith("ERROR:"):
+            self.failed.add(self.index)
+            message = friendly_error(line)
+            if not self.first_error:
+                self.first_error = message
+            if self.playlist:
+                return []  # yt-dlp moves on to the next item; reported in the result
+            return [{"type": "error", "message": message}]
+        if _DONE_RE.search(line):
+            self.finished.add(self.index)
+        m = _PERCENT_RE.match(line)
+        if m:
+            pct = min(100.0, float(m.group(1))) * DOWNLOAD_SHARE
+            self.file_pct = max(self.file_pct, pct)
+            return self._progress(self._label())
+        if "has already been downloaded" in line:
+            self.file_pct = 100.0
+            return self._progress(self._label())
+        if _CONVERT_RE.match(line):
+            self.file_pct = max(self.file_pct, 100.0 * DOWNLOAD_SHARE)
+            return self._progress(self._label(converting=True))
+        return []
+
+    def finish(self, returncode):
+        """Final events and whether the whole link was saved."""
+        if returncode == 0:
+            saved = self.total - len(self.failed)
+        else:
+            # stopped or failed: only count tracks that actually reached disk
+            saved = len(self.finished - self.failed)
+        saved = max(0, min(saved, self.total))
+        ok = returncode == 0 and saved == self.total
+        events = []
+        if saved == 0 and (self.playlist or not self.failed):
+            # a single track's error was already sent when it happened
+            events.append({"type": "error", "message": self.first_error or GENERIC_ERROR})
+        events.append({"type": "result", "saved": saved, "failed": self.total - saved, "total": self.total})
+        return events, ok
+
+
+_GOFI_PROGRESS_RE = re.compile(r"^downloading (\d+) of (\d+)$", re.I)
+
+
+def gofi_event(raw):
+    """Normalize a wax-gofi event to the UI's copy: lowercase, 'track N of M'."""
+    try:
+        event = json.loads(raw)
+    except ValueError:
+        return None
+    if not isinstance(event, dict):
+        return None
+    message = event.get("message")
+    if isinstance(message, str):
+        m = _GOFI_PROGRESS_RE.match(message.strip())
+        event["message"] = f"track {m.group(1)} of {m.group(2)}" if m else message.lower()
+    return event
+
+
 def load_config():
     try:
         with open(CONFIG_PATH) as f:
@@ -384,6 +546,7 @@ def download():
                 stdin=subprocess.PIPE if is_spotify else None,
                 cwd=workdir.name if workdir else None,
                 text=True,
+                errors="replace",  # a stray non-UTF-8 byte must not kill the reader
                 bufsize=1,
                 **kwargs,
             )
@@ -394,28 +557,35 @@ def download():
                            "output": os.path.abspath(output_path), "arl": deezer_arl}
                 json.dump(payload, proc.stdin)
                 proc.stdin.close()
+            tracker = None if is_spotify else YtdlpProgress()
             for line in proc.stdout:
                 line = line.rstrip()
                 if is_spotify:
                     if line.startswith("WAX_EVENT:"):
-                        q.put("__WAX__:" + line[len("WAX_EVENT:"):])
-                else:
-                    q.put(line)
+                        event = gofi_event(line[len("WAX_EVENT:"):])
+                        if event is not None:
+                            q.put("__WAX__:" + json.dumps(event))
+                    continue
+                for event in tracker.feed(line):
+                    q.put("__WAX__:" + json.dumps(event))
                 if "Destination:" in line:
-                    parts = line.split("Destination:")
-                    if len(parts) > 1:
-                        entry["filename"] = os.path.basename(parts[1].strip())
+                    entry["filename"] = os.path.basename(line.split("Destination:", 1)[1].strip())
                 elif "has already been downloaded" in line:
-                    fname = line.split("]")[-1].strip().split(" has already")[0].strip()
+                    fname = line.split("]", 1)[-1].strip().split(" has already")[0].strip()
                     if fname:
                         entry["filename"] = os.path.basename(fname)
             proc.wait()
-            status = "done" if proc.returncode == 0 else "error"
+            ok = proc.returncode == 0
+            if tracker is not None:
+                events, ok = tracker.finish(proc.returncode)
+                for event in events:
+                    q.put("__WAX__:" + json.dumps(event))
+            status = "done" if ok else "error"
             entry["status"] = status
         except Exception as e:
             status = "error"
             entry["status"] = status
-            q.put(f"ERROR: {e}")
+            q.put("__WAX__:" + json.dumps({"type": "error", "message": friendly_error(str(e))}))
         finally:
             active_procs.discard(proc)
             if is_spotify and workdir:
