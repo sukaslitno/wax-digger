@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-fetch_binaries.py — download yt-dlp + ffmpeg (+ ffprobe) for the *current* OS
+fetch_binaries.py — download yt-dlp + ffmpeg for the *current* OS
 into packaging/bin/, so PyInstaller can bundle them into a self-contained app.
 
   python3 packaging/fetch_binaries.py
@@ -29,11 +29,11 @@ YTDLP = {
     "Linux": "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux",
 }
 
-# ffmpeg/ffprobe static builds.
-# Windows/Linux: BtbN bundles ffmpeg + ffprobe in one archive.
+# ffmpeg static builds (ffprobe is deliberately not bundled: each static binary
+# is ~190 MB uncompressed, and yt-dlp falls back to `ffmpeg -i` where it can).
+# Windows/Linux: BtbN archive; only ffmpeg is extracted from it.
 # macOS: ffmpeg-static ships a native, dependency-free binary per arch
-#        (evermeet's cookie-on-302 flow breaks urllib). ffprobe isn't included,
-#        which is fine — yt-dlp only needs ffmpeg for our re-encode extraction.
+#        (evermeet's cookie-on-302 flow breaks urllib). No ffprobe there either.
 # NB: BtbN's rolling build lives under the explicit "latest" *tag*, not GitHub's
 # /releases/latest/ (which resolves to the stable nX.Y release that lacks the
 # master-* assets -> 404).
@@ -123,16 +123,14 @@ def fetch_ffmpeg(system):
         arc = os.path.join(tempfile.gettempdir(), "ffmpeg-win.zip")
         download(FFMPEG_WIN, arc)
         extract_from_archive(arc, {"ffmpeg.exe"}, "ffmpeg")
-        extract_from_archive(arc, {"ffprobe.exe"}, "ffprobe")
     elif system == "Linux":
         arc = os.path.join(tempfile.gettempdir(), "ffmpeg-linux.tar.xz")
         download(FFMPEG_LINUX, arc)
         extract_from_archive(arc, {"ffmpeg"}, "ffmpeg")
-        extract_from_archive(arc, {"ffprobe"}, "ffprobe")
     elif system == "Darwin":
         tmp = os.path.join(tempfile.gettempdir(), "ffmpeg-mac")
         download(ffmpeg_mac_url(), tmp)
-        save_binary(tmp, "ffmpeg")  # native static binary, no ffprobe needed
+        save_binary(tmp, "ffmpeg")  # native static binary
     else:
         raise RuntimeError(f"unsupported OS: {system}")
 
