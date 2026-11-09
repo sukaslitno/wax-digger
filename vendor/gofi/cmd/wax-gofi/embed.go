@@ -28,33 +28,37 @@ type embedEntity struct {
 	} `json:"trackList"`
 }
 
+// missingTrack is a Spotify track that has no match on Deezer.
+type missingTrack struct{ Artist, Title, Reason string }
+
 // Spotify's public embed contains metadata even when its Web API is rate-limited.
 // A match is accepted only by GoFi's title, artist, version and duration checks.
-func resolveEmbed(parts converter.URLParts) (converter.ParseResult, int, error) {
+// Tracks without a match come back by name.
+func resolveEmbed(parts converter.URLParts) (converter.ParseResult, int, []missingTrack, error) {
 	kind := strings.TrimPrefix(parts.Type, "spotify-")
 	if kind != "track" && kind != "album" {
-		return converter.ParseResult{}, 0, fmt.Errorf("Spotify playlist is unavailable")
+		return converter.ParseResult{}, 0, nil, fmt.Errorf("spotify playlist is unavailable")
 	}
 	if !regexp.MustCompile(`^[A-Za-z0-9]+$`).MatchString(parts.ID) {
-		return converter.ParseResult{}, 0, fmt.Errorf("Invalid Spotify link")
+		return converter.ParseResult{}, 0, nil, fmt.Errorf("invalid spotify link")
 	}
 	req, _ := http.NewRequest("GET", "https://open.spotify.com/embed/"+kind+"/"+parts.ID, nil)
 	req.Header.Set("User-Agent", "Mozilla/5.0")
 	response, err := (&http.Client{Timeout: 20 * time.Second}).Do(req)
 	if err != nil {
-		return converter.ParseResult{}, 0, err
+		return converter.ParseResult{}, 0, nil, err
 	}
 	defer response.Body.Close()
 	if response.StatusCode != 200 {
-		return converter.ParseResult{}, 0, fmt.Errorf("Spotify embed returned %s", response.Status)
+		return converter.ParseResult{}, 0, nil, fmt.Errorf("spotify embed returned %s", strings.ToLower(response.Status))
 	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, 4<<20))
 	if err != nil {
-		return converter.ParseResult{}, 0, err
+		return converter.ParseResult{}, 0, nil, err
 	}
 	match := regexp.MustCompile(`(?s)<script[^>]*id="__NEXT_DATA__"[^>]*>(.*?)</script>`).FindSubmatch(body)
 	if len(match) != 2 {
-		return converter.ParseResult{}, 0, fmt.Errorf("Spotify embed metadata missing")
+		return converter.ParseResult{}, 0, nil, fmt.Errorf("spotify embed metadata missing")
 	}
 	var page struct {
 		Props struct {
@@ -68,11 +72,11 @@ func resolveEmbed(parts converter.URLParts) (converter.ParseResult, int, error) 
 		} `json:"props"`
 	}
 	if err := json.Unmarshal([]byte(html.UnescapeString(string(match[1]))), &page); err != nil {
-		return converter.ParseResult{}, 0, err
+		return converter.ParseResult{}, 0, nil, err
 	}
 	entity := page.Props.PageProps.State.Data.Entity
 	if entity.Type != kind {
-		return converter.ParseResult{}, 0, fmt.Errorf("Spotify link returned unexpected content")
+		return converter.ParseResult{}, 0, nil, fmt.Errorf("spotify link returned unexpected content")
 	}
 	result := converter.ParseResult{Info: parts, LinkType: kind, LinkInfo: map[string]any{"ALB_TITLE": entity.Name}}
 	source := []converter.SpotifyTrack{}
@@ -89,19 +93,27 @@ func resolveEmbed(parts converter.URLParts) (converter.ParseResult, int, error) 
 		}
 	}
 	if len(source) == 0 {
-		return result, 0, fmt.Errorf("Spotify did not provide any tracks")
+		return result, 0, nil, fmt.Errorf("spotify did not provide any tracks")
 	}
+	missing := []missingTrack{}
 	for i, item := range source {
-		emit(map[string]any{"type": "status", "message": fmt.Sprintf("Finding track %d of %d on Deezer…", i+1, len(source))})
-		if item.Name == "" || item.DurationMS <= 0 || len(item.Artists) == 0 || item.Artists[0].Name == "" {
+		emit(map[string]any{"type": "status", "message": fmt.Sprintf("finding track %d of %d on deezer…", i+1, len(source))})
+		artist := ""
+		if len(item.Artists) > 0 {
+			artist = item.Artists[0].Name
+		}
+		if item.Name == "" || item.DurationMS <= 0 || artist == "" {
+			missing = append(missing, missingTrack{artist, item.Name, reasonNoDetails})
 			continue
 		}
 		track, err := converter.SpotifyTrackMetadataToDeezer(item)
-		if err == nil {
-			position := i + 1
-			track.TRACK_POSITION = &position
-			result.Tracks = append(result.Tracks, track)
+		if err != nil {
+			missing = append(missing, missingTrack{artist, item.Name, reasonNotFound})
+			continue
 		}
+		position := i + 1
+		track.TRACK_POSITION = &position
+		result.Tracks = append(result.Tracks, track)
 	}
-	return result, len(source), nil
+	return result, len(source), missing, nil
 }

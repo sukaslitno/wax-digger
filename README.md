@@ -1,14 +1,11 @@
 # Wax Digger
 
-A tiny local audio downloader built on **yt-dlp**, with a matching browser
-extension. Two pieces:
+A tiny local audio downloader built on **yt-dlp**.
 
 - **`ytdlp-gui/`** — a local Flask server (`127.0.0.1:7337`) shown in a native
   frameless window (pywebview), not a browser tab. Shipped as a self-contained
   desktop app: **`WaxDigger.dmg`** (macOS) and **`WaxDigger.exe`** (Windows
   portable), each bundling `yt-dlp` + `ffmpeg`.
-- **`ytdlp-extension/`** — a cross-browser extension: a popup, plus a ↓ button
-  injected into Bandcamp-linked album cards on `badger.greenlight.hr`.
 
 ## Install (users)
 
@@ -18,12 +15,27 @@ Grab the files for your platform from the **[Releases](../../releases)** page:
 | --- | --- | --- |
 | macOS | `WaxDigger.dmg` | Open → drag **Wax Digger** to Applications. First launch: right-click → **Open** (unsigned app). |
 | Windows | `WaxDigger.exe` | Double-click. SmartScreen → **More info → Run anyway** (unsigned). |
-| Chrome/Edge/Brave/Opera/Vivaldi/Arc | `wax-digger-chrome.zip` | Unzip → `chrome://extensions` → Developer mode → **Load unpacked**. |
-| Firefox | `.xpi` / `wax-digger-firefox.zip` | `.xpi` = permanent; zip = temporary via `about:debugging`. |
 
 The desktop app bundles everything — no Python, yt-dlp, or ffmpeg to install.
-Run it — the WAX window opens on your desktop. The extension popup and the ↓
-button on badger.greenlight.hr talk to the same local server.
+Run it — the WAX window opens on your desktop.
+
+Every link lands the same way, whatever the source:
+
+```
+Artist - Title [320].mp3                       # a single track
+Album/001 - Artist - Title [320].mp3           # an album
+Playlist/001 - Artist - Title [320].mp3        # a playlist
+```
+
+Tags and the cover are embedded in the files (WAV gets tags only).
+
+yt-dlp keeps itself up to date without a new app release: Wax copies the
+bundled yt-dlp into the user data dir (macOS `~/Library/Application
+Support/Wax Digger/bin`, Windows `%LOCALAPPDATA%\Wax Digger\bin`, Linux
+`~/.local/share/wax-digger/bin`) and runs yt-dlp's own updater on it about once
+a day, never during a download, and right away when a download fails the way an
+outdated extractor does. Each download uses the newer of that copy and the
+bundled one; a broken update is never switched to.
 
 Spotify track, album and public playlist links use the bundled GoFi downloader
 to find matching tracks on Deezer. A Deezer session (ARL) is required. Wax
@@ -49,7 +61,6 @@ git push origin v1.0.0
 ```
 
 GitHub Actions then builds and attaches to a single Release:
-- the extension packages (Chrome zip + Firefox zip, or signed `.xpi` if AMO secrets are set),
 - `WaxDigger.dmg` (built on a macOS runner),
 - `WaxDigger.exe` (built on a Windows runner).
 
@@ -59,13 +70,9 @@ GitHub Actions then builds and attaches to a single Release:
 # desktop app (current OS) — needs Go 1.25+ and: pip install pyinstaller pillow flask pywebview
 bash packaging/build_macos.sh        # macOS  → dist/WaxDigger.dmg
 pwsh packaging/build_windows.ps1     # Windows → dist/WaxDigger.exe
-
-# extension
-cd ytdlp-extension && node build.js   # → dist/*.zip
 ```
 
-See [`ytdlp-extension/README.md`](ytdlp-extension/README.md) for extension
-details and [`ytdlp-gui/README.md`](ytdlp-gui/README.md) for the server.
+See [`ytdlp-gui/README.md`](ytdlp-gui/README.md) for the server.
 
 ## Notes
 
