@@ -14,7 +14,7 @@ mkdir -p packaging/bin
 # Keep separately archived releases in dist when producing a fresh build.
 rm -rf build "dist/$APP" "dist/$APP.app" "dist/dmg" "dist/WaxDigger.dmg"
 
-# bundle whatever binaries fetch_binaries produced (yt-dlp, ffmpeg, maybe ffprobe)
+# bundle whatever binaries fetch_binaries produced (yt-dlp, ffmpeg)
 BIN_ARGS=()
 for f in packaging/bin/*; do
   BIN_ARGS+=(--add-binary "$f:bin")
