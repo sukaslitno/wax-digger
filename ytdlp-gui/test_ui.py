@@ -30,6 +30,17 @@ def main():
     assert call, "the UI never calls resize()"
     heights = {int(h) for h in re.findall(r"\d+", call.group(1))}
     assert {260, 336, 396, 432}.issubset(heights), f"unexpected window heights: {heights}"
+    # the details screen reuses the tallest main-screen height (432 + deezer row + status)
+    assert 558 in heights and max(heights) == 558, f"details screen height changed: {heights}"
+
+    # details screen: an in-window screen like info, closed by the corner (x) and Esc,
+    # every new string in one lookup for the coming translation
+    for marker in ('id="detailsScreen"', 'id="detailsSummary"', 'id="detailsLog"', 'id="copyBtn"',
+                   'id="statusMore"', "const STRINGS = ", '"/log/"', '"copy_text"'):
+        assert marker in page, f"missing {marker}"
+    assert 'class="btn btn--white btn--full" id="copyBtn"' in page, "copy must be the white button-large"
+    assert "if (info || details) { info = details = false;" in page, "Esc must close the details screen"
+    assert c.get("/log/999999").status_code == 404
 
     # the window is dragged by the modal backdrop only — easy_drag would hijack
     # every mouse drag and make the url/folder fields unselectable
@@ -45,14 +56,24 @@ def main():
     # window controls: markup on the page, actions on the bridge
     for marker in ('id="winTools"', 'id="winClose"', 'id="winMin"'):
         assert marker in page, f"missing {marker}"
-    for method in ("platform", "minimize", "quit"):
+    for method in ("platform", "minimize", "quit", "reveal", "clipboard_url", "copy_text"):
         assert callable(getattr(wax.Api, method, None)), f"bridge lacks {method}()"
 
     # one download pass, one file left behind, one track per link
     dl = inspect.getsource(wax.download)
-    assert '"-k"' not in dl, "-k keeps the source video next to the mp3"
-    for flag in ("bestaudio/best", "--newline", "--no-playlist", "expanduser"):
-        assert flag in dl, f"download() lost {flag}"
+    assert "expanduser" in dl, "download() lost expanduser"
+    cmd = wax.build_ytdlp_command("https://example.com/a", "mp3_320", "/out", ytdlp=["yt-dlp"])
+    assert "-k" not in cmd, "-k keeps the source video next to the mp3"
+    for flag in ("bestaudio/best", "--newline", "--no-playlist", "--ignore-config",
+                 "--embed-metadata", "--embed-thumbnail"):
+        assert flag in cmd, f"yt-dlp command lost {flag}"
+    assert cmd[-2:] == ["--", "https://example.com/a"], "the link must come after --"
+    assert cmd[cmd.index("-o") + 1] == wax.output_template("mp3_320")
+    assert cmd[cmd.index("-P") + 1] == "/out"
+    # WAV cannot carry a cover; asking for one would fail the download
+    assert "--embed-thumbnail" not in wax.build_ytdlp_command("u", "wav", "/out", ytdlp=["y"])
+    # "AAC" is AAC in an .m4a container, which can hold tags and a cover
+    assert wax.FORMATS["aac"][wax.FORMATS["aac"].index("--audio-format") + 1] == "m4a"
 
     # quitting must not leave yt-dlp/ffmpeg running (Api.window is None here,
     # so nothing tries to close a window)
@@ -61,6 +82,14 @@ def main():
     wax.Api().quit()
     assert child.wait(5) != 0, "Api.quit() left the child process running"
     wax.active_procs.discard(child)
+
+    # while busy the one action button cancels the running download or queues
+    # the next link; an unknown id is simply not cancelled
+    for marker in ('"/cancel/"', '"btn.cancel": "cancel"', '"btn.add": "add to queue"', '"st.cancelled": "cancelled"'):
+        assert marker in page, f"missing {marker}"
+    assert c.post("/cancel/999999").get_json() == {"cancelled": False}
+    assert callable(getattr(wax.Api, "on_closing", None)), "no closing-event handler"
+    assert "events.closing += api.on_closing" in src, "quitting must ask while downloads run"
 
     # a typed field is not a link until it parses as one
     assert "isLikelyUrl" in page, "url validation is missing"
