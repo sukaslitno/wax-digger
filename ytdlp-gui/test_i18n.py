@@ -78,7 +78,7 @@ class DictionaryShape:
     def test_russian_is_russian(self):
         # a Russian string left in English is a missed translation (brand words and codes aside)
         same = [k for k in self.en if self.en[k] == self.ru[k]]
-        self.assertEqual(same, ["deezer.arl"] if "deezer.arl" in self.en else [])
+        self.assertEqual(same, [])
 
 
 class ServerDictionaryTests(DictionaryShape, unittest.TestCase):
