@@ -380,6 +380,10 @@ html, body {
     "st.links_saved": ["{saved} of {n} link saved", "{saved} of {n} links saved"],
     "err.generic": "couldn't grab this one",
     "drm": "{name} is drm-locked — try bandcamp, youtube or spotify",
+    "q.bandcamp": "bandcamp gives only mp3 128k for free, 320 and flac after purchase",
+    "q.mp3": "the source only has mp3 {n}k — saved as is, nothing higher",
+    "q.lossy": "the source streams ~{n}k: the ceiling, flac and wav won't add to it",
+    "q.lossy_any": "the source streams compressed audio: flac and wav won't add to it",
     "details.more": " · details",
     "copy": "copy",
     "copied": "copied",
@@ -426,6 +430,10 @@ html, body {
     "st.links_saved": ["готово {saved} из {n} ссылки", "готово {saved} из {n} ссылок", "готово {saved} из {n} ссылок"],
     "err.generic": "не вышло скачать",
     "drm": "{name} под drm — бери с bandcamp, youtube или spotify",
+    "q.bandcamp": "bandcamp бесплатно даёт только mp3 128k, 320 и flac — после покупки",
+    "q.mp3": "у источника только mp3 {n}k — качаю как есть, выше не бывает",
+    "q.lossy": "источник отдаёт ~{n}k — это потолок, flac и wav его не улучшат",
+    "q.lossy_any": "источник отдаёт сжатый звук — flac и wav его не улучшат",
     "details.more": " · подробнее",
     "copy": "скопировать",
     "copied": "скопировано",
@@ -525,7 +533,11 @@ const el = (id) => document.getElementById(id);
 const urlEl = el("url"), folderEl = el("folder"), actionBtn = el("actionBtn");
 const progressEl = el("progress"), urlInput = el("urlInput");
 
-let fmtIndex = 1;  // mp3 320k
+let fmtKey = "mp3_320";  // the audio format chosen; narrowed to what the link's source has
+let fmtTouchedFor = "";  // the link the chip was picked by hand for: its probe keeps that choice
+// What each link's audio really is (/probe): url -> {formats, best, source}.
+const probes = new Map();
+let probeTimer = 0;
 let videoMode = false;   // the audio / video chip; only YouTube links show it
 let videoIndex = 3;      // 1080p: the best that is still H.264, which plays everywhere
 let phase = "idle";      // idle | busy | done | cancelled | error
@@ -563,10 +575,86 @@ function isYouTubeVideo(value) {
 
 function videoChosen() { return videoMode && isYouTubeVideo(urlEl.value); }
 
-function availableFormats() { return isSpotify(urlEl.value) ? FORMATS.slice(0, 3) : FORMATS; }
+// The probe of the link in the field, once it has answered.
+function probeOf(value) {
+  const p = probes.get(value.trim());
+  return p && !p.then ? p : null;
+}
+
+// Spotify has Deezer's three; any other link what its source makes worth it
+// (no flac of a lossy stream, no "320" of a 128k mp3); all until it is known.
+function availableFormats() {
+  if (isSpotify(urlEl.value)) return FORMATS.slice(0, 3);
+  const p = probeOf(urlEl.value);
+  return p && p.formats ? FORMATS.filter(([key]) => p.formats.includes(key)) : FORMATS;
+}
+
+// Keep the chosen format if the link has it, else take the link's best.
+function fitFormat() {
+  const offered = availableFormats();
+  if (offered.some(([key]) => key === fmtKey)) return;
+  const p = !isSpotify(urlEl.value) && probeOf(urlEl.value);
+  const best = p && p.best;
+  fmtKey = (offered.find(([key]) => key === best) || offered.find(([key]) => key === "mp3_320") || offered[0])[0];
+}
 
 // [backend key, chip label] of what the chips are set to for the link in the field
-function chosenFormat() { return videoChosen() ? VIDEO_FORMATS[videoIndex] : FORMATS[fmtIndex]; }
+function chosenFormat() {
+  return videoChosen() ? VIDEO_FORMATS[videoIndex] : FORMATS.find(([key]) => key === fmtKey) || FORMATS[1];
+}
+
+// Ask the server what the link's audio is. The answer narrows the chip and,
+// unless the chip was picked by hand, sets it to the best the source has.
+function probeLater() {
+  clearTimeout(probeTimer);
+  const url = urlEl.value.trim();
+  if (!isLikelyUrl(url) || isSpotify(url) || urlInvalid || probes.has(url)) return;
+  probeTimer = setTimeout(() => startProbe(url), 300);
+}
+
+function startProbe(url) {
+  if (probes.has(url)) return probes.get(url);
+  const pending = fetch("/probe", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }),
+  }).then((r) => r.json()).catch(() => null).then((p) => {
+    if (p && p.formats) probes.set(url, p);
+    else probes.delete(url);  // unknown: offer all, ask again for the next paste
+    probed(url, p && p.formats ? p : null);
+    return p;
+  });
+  probes.set(url, pending);
+  return pending;
+}
+
+function probed(url, p) {
+  // the chip belongs to a running download while the field holds its link
+  const free = phase === "idle" || (phase === "busy" && busyAction() === "add");
+  if (!p || urlEl.value.trim() !== url || !free) { render(); return; }
+  if (fmtTouchedFor !== url && p.best) fmtKey = p.best;
+  fitFormat();
+  render();
+}
+
+// Wait (a little) for the probe of a link about to be grabbed, so it does not
+// start with a format its source cannot back.
+function probeSettled(url, ms) {
+  const pending = probes.get(url);
+  if (!pending || !pending.then) return Promise.resolve();
+  return Promise.race([pending, new Promise((done) => setTimeout(done, ms))]);
+}
+
+// Why the chip offers what it does: what the source really gives.
+function qualityNote() {
+  if (videoChosen() || isSpotify(urlEl.value)) return "";
+  const p = probeOf(urlEl.value);
+  const s = p && p.source;
+  if (!s || s.kind === "lossless") return "";
+  if (s.kind === "mp3") {
+    if (/^bandcamp/.test(s.site) && (!s.kbps || s.kbps <= 128)) return t("q.bandcamp");
+    return s.kbps ? t("q.mp3", { n: s.kbps }) : "";
+  }
+  return s.kbps ? t("q.lossy", { n: s.kbps }) : t("q.lossy_any");
+}
 
 // Returns the bridge call's promise, or null when running in a plain browser.
 function api(name, ...args) {
@@ -607,7 +695,7 @@ function render() {
   const action = phase === "busy" ? busyAction() : "";
   // the filled screen stays while anything runs, even with the field emptied
   const filled = hasUrl || phase !== "idle";
-  if (spotify && fmtIndex > 2) fmtIndex = 0;
+  fitFormat();
   el("modeChip").hidden = !isYouTubeVideo(urlEl.value);
   el("modeChip").textContent = t(videoMode ? "mode.video" : "mode.audio");
   el("fmtChip").textContent = chosenFormat()[1];
@@ -652,7 +740,9 @@ function render() {
   // a link that cannot work says why, until a download has something to report
   const drm = urlInvalid && phase !== "busy" ? drmMessage(drmName) : "";
   const shown = msgText(statusMessage);
-  const status = drm || (shown && queued > 0 ? `${shown} · ${t("st.queued", { n: queued })}` : shown);
+  // with nothing else to say, the line tells why the chip offers what it does
+  const note = !drm && !shown && (phase === "idle" || action === "add") && hasUrl ? qualityNote() : "";
+  const status = drm || (shown && queued > 0 ? `${shown} · ${t("st.queued", { n: queued })}` : shown) || note;
   // a failed or partial download offers its details right on the status line
   const more = !drm && hasDetails();
   el("downloadStatus").hidden = screen || !status;
@@ -661,7 +751,8 @@ function render() {
   el("downloadStatus").dataset.more = String(more);
   el("downloadStatus").tabIndex = more ? 0 : -1;
   el("downloadStatus").dataset.error = String(!!drm || statusError);
-  el("downloadStatus").dataset.clip = String(phase === "done");
+  el("downloadStatus").dataset.clip = String(phase === "done" || !!note);
+  el("downloadStatus").title = note;
   el("infoMade").textContent = [t("made"), appVersion && "v" + appVersion,
     ytdlpVersion && "yt-dlp " + ytdlpVersion].filter(Boolean).join(" · ");
   el("langBtn").textContent = lang;
@@ -680,7 +771,12 @@ function setProgress(pct) {
 el("fmtChip").addEventListener("click", () => {
   edited();
   if (videoChosen()) videoIndex = (videoIndex + 1) % VIDEO_FORMATS.length;
-  else fmtIndex = (fmtIndex + 1) % availableFormats().length;
+  else {
+    const offered = availableFormats();
+    const i = offered.findIndex(([key]) => key === fmtKey);
+    fmtKey = offered[(i + 1) % offered.length][0];
+    fmtTouchedFor = urlEl.value.trim();
+  }
   el("fmtChip").textContent = chosenFormat()[1];
 });
 // audio / video: each keeps its own choice, so switching back loses nothing
@@ -754,6 +850,17 @@ async function enqueue() {
   posting = url;
   render();
 
+  // grabbed before the probe answered: give it a moment, then start with the
+  // source's best (or keep the hand-picked format if the source has it)
+  if (!videoChosen() && !isSpotify(url)) {
+    clearTimeout(probeTimer);
+    if (isLikelyUrl(url) && !probes.has(url)) startProbe(url);
+    await probeSettled(url, 8000);
+    const p = probeOf(url);
+    if (p && p.best && fmtTouchedFor !== url && urlEl.value.trim() === url) fmtKey = p.best;
+    fitFormat();
+  }
+
   let stream_id, error;
   try {
     const r = await fetch("/download", {
@@ -775,6 +882,7 @@ async function enqueue() {
     return;
   }
   seenLinks.add(url);
+  fmtTouchedFor = "";  // the next link starts from its own best again
   jobs.push({ id: stream_id, url, out: folderEl.value.trim() });
   if (!first && urlEl.value.trim() === url) { urlEl.value = ""; validate(); }
   if (jobs.length === 1) follow(jobs[0]);
@@ -1115,7 +1223,7 @@ function edited() {
 urlEl.addEventListener("input", () => {
   const v = urlEl.value.trim();
   if (v) handledLink = v;
-  edited(); validate(); render();
+  edited(); validate(); probeLater(); render();
 });
 folderEl.addEventListener("input", () => { edited(); render(); });
 // Enter adds or grabs, but never cancels a download by accident
@@ -1131,7 +1239,7 @@ function setUrl(link) {
   details = false;
   urlEl.value = link;
   handledLink = link;
-  edited(); validate(); render();
+  edited(); validate(); probeLater(); render();
   urlEl.focus();
 }
 
