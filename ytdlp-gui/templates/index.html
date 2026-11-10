@@ -117,6 +117,14 @@ html, body {
 }
 .input input::placeholder { color: rgba(255, 255, 255, .48); }
 .input__chip { height: 48px; }
+/* clears the link field; shown only while it holds something */
+.input__clear {
+  display: inline-flex; flex-shrink: 0; margin-right: -4px;
+  border: 0; background: none; padding: 0; cursor: pointer; color: #fff;
+  opacity: .48; transition: opacity .15s ease;
+}
+.input__clear:hover, .input__clear:focus-visible { opacity: 1; }
+.input__clear:focus-visible { outline: none; }
 /* two chips side by side keep the 4px gap of buttons in a row (folder, info) */
 .input__chip--lead { margin-right: -12px; }
 
@@ -126,6 +134,7 @@ html, body {
 }
 .input[data-state="error"] .input__icon { color: var(--red); }
 .input[data-state="error"] input { color: var(--red); }
+.input[data-state="error"] .input__clear { color: var(--red); }
 .input[data-state="error"] .input__chip { opacity: .24; pointer-events: none; }
 
 /* ===== layout ===== */
@@ -245,6 +254,14 @@ html, body {
         </svg>
       </span>
       <input id="url" type="text" data-i18n-placeholder="url.placeholder" autocomplete="off" spellcheck="false">
+      <button type="button" class="input__clear" id="urlClear" data-i18n-aria="aria.clear" hidden>
+        <span class="ic24">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path opacity="0.5" d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M14.5 9.5L9.5 14.5M9.5 9.5L14.5 14.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </span>
+      </button>
       <button type="button" class="btn btn--white input__chip input__chip--lead" id="modeChip" hidden></button>
       <button type="button" class="btn btn--white input__chip" id="fmtChip"></button>
     </label>
@@ -394,6 +411,7 @@ html, body {
     "made": "made by jeneverbes",
     "aria.info": "info",
     "aria.close": "close",
+    "aria.clear": "clear the link",
     "aria.minimize": "minimize",
     "aria.donate": "donate",
     "aria.language": "language"
@@ -440,6 +458,7 @@ html, body {
     "made": "сделал jeneverbes",
     "aria.info": "инфо",
     "aria.close": "закрыть",
+    "aria.clear": "стереть ссылку",
     "aria.minimize": "свернуть",
     "aria.donate": "поддержать",
     "aria.language": "язык"
@@ -611,6 +630,7 @@ function render() {
   el("modeChip").hidden = !isYouTubeVideo(urlEl.value);
   el("modeChip").textContent = t(videoMode ? "mode.video" : "mode.audio");
   el("fmtChip").textContent = chosenFormat()[1];
+  el("urlClear").hidden = !urlEl.value;
 
   if (details && !hasDetails()) details = false;
   const screen = info || details;  // a screen over the main one, closed by the corner (x)
@@ -778,6 +798,7 @@ async function enqueue() {
   jobs.push({ id: stream_id, url, out: folderEl.value.trim() });
   if (!first && urlEl.value.trim() === url) { urlEl.value = ""; validate(); }
   if (jobs.length === 1) follow(jobs[0]);
+  try { api("dismiss_link", url); } catch (e) {}  // not offered from the clipboard after a restart
   render();
 }
 
@@ -1129,6 +1150,8 @@ urlEl.addEventListener("keydown", (e) => {
 function setUrl(link) {
   info = false;
   details = false;
+  filledLink = link;
+  wholeOnClick = true;
   urlEl.value = link;
   handledLink = link;
   edited(); validate(); render();
@@ -1155,15 +1178,67 @@ window.addEventListener("drop", (e) => {
   if (link) setUrl(link);
 });
 
-// When the window opens or gains focus with nothing typed, offer a copied link.
-// It only fills the field; starting is the user's call.
+// ===== clearing the link field: the (x) in it, or Esc while it has text =====
+// A link cleared away, or deleted by hand, is not offered from the clipboard
+// again, this launch or the next (the server keeps a short list of them).
+let filledLink = "";     // the link last put in the field from outside or pasted
+function dismissLink(link) {
+  link = (link || "").trim();
+  if (!link) return;
+  seenLinks.add(link);
+  try { api("dismiss_link", link); } catch (e) {}
+}
+
+function clearUrl() {
+  dismissLink(urlEl.value);
+  dismissLink(filledLink);
+  filledLink = "";
+  urlEl.value = "";
+  edited(); validate(); render();
+  urlEl.focus();
+}
+
+el("urlClear").addEventListener("click", (e) => { e.preventDefault(); clearUrl(); });
+urlEl.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || !urlEl.value) return;
+  e.preventDefault();
+  e.stopPropagation();  // Esc on an empty field still closes the window
+  clearUrl();
+});
+urlEl.addEventListener("paste", () => {
+  setTimeout(() => { if (isLikelyUrl(urlEl.value)) filledLink = urlEl.value.trim(); }, 0);
+});
+urlEl.addEventListener("input", () => {
+  wholeOnClick = false;
+  if (!urlEl.value.trim() && filledLink) { dismissLink(filledLink); filledLink = ""; }
+});
+
+// The first click on a link put in from outside takes it whole, so the next
+// paste replaces it; later clicks place the caret as usual.
+let wholeOnClick = true;
+window.addEventListener("blur", () => { wholeOnClick = true; });
+urlEl.addEventListener("mouseup", () => {
+  if (!wholeOnClick) return;
+  wholeOnClick = false;
+  if (urlEl.value && urlEl.selectionStart === urlEl.selectionEnd) urlEl.select();
+});
+
+// When the window opens or gains focus, offer a copied link. It only fills the
+// field; starting is the user's call. A link already handed to the server is
+// done with, so a newly copied one takes its place (one link after another
+// needs no clearing); anything else in the field is kept.
 let prefilling = false;
+function replaceable() {
+  if (phase === "cancelled") return false;
+  const v = urlEl.value.trim();
+  return !v || (seenLinks.has(v) && v !== posting);
+}
 async function prefillFromClipboard() {
-  if (prefilling || phase !== "idle" || urlEl.value.trim()) return;
+  if (prefilling || !replaceable()) return;
   prefilling = true;
   try {
     const link = await api("clipboard_url");
-    if (link && link !== handledLink && !seenLinks.has(link) && phase === "idle" && !urlEl.value.trim()) setUrl(link);
+    if (link && link !== handledLink && !seenLinks.has(link) && link !== urlEl.value.trim() && replaceable()) setUrl(link);
   } catch (e) {} finally { prefilling = false; }
 }
 window.addEventListener("focus", prefillFromClipboard);
