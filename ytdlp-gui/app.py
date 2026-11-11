@@ -155,15 +155,26 @@ _stream_ids = itertools.count(1)
 STREAM_TTL = 60
 active_procs = set()
 
+# Lossy formats ask for an exact bitrate ("320K" = constant 320 kbps). A bare
+# number is a VBR scale instead: "0" gives LAME V0, ~245 kbps, not 320.
+# A source already in the target codec (Bandcamp's mp3, an AAC stream) is
+# copied as is whatever the bitrate asked for: re-encoding it could only lose.
 FORMATS = {
-    "mp3_128": ["-x", "--audio-format", "mp3", "--audio-quality", "5"],
-    "mp3_320": ["-x", "--audio-format", "mp3", "--audio-quality", "0"],
+    "mp3_128": ["-x", "--audio-format", "mp3", "--audio-quality", "128K"],
+    "mp3_320": ["-x", "--audio-format", "mp3", "--audio-quality", "320K"],
     "flac":    ["-x", "--audio-format", "flac"],
     "wav":     ["-x", "--audio-format", "wav"],
     # AAC in an .m4a (MP4) container: raw .aac (ADTS) cannot hold tags or a
-    # cover, and an AAC source (YouTube itag 140) is copied without re-encoding.
-    "aac":     ["-x", "--audio-format", "m4a", "--audio-quality", "0"],
+    # cover. An AAC stream is preferred (see AUDIO_SELECT) and copied without
+    # re-encoding; only a source with none (opus, mp3) is encoded, at 256k.
+    "aac":     ["-x", "--audio-format", "m4a", "--audio-quality", "256K"],
 }
+AUDIO_FORMATS = tuple(FORMATS)
+
+# Which stream an audio download takes: the best one, except that aac takes an
+# AAC stream when there is one (YouTube itag 140), so it is a copy, not a re-encode.
+AUDIO_SELECT = {"aac": "bestaudio[acodec^=mp4a]/bestaudio/best"}
+DEFAULT_AUDIO_SELECT = "bestaudio/best"
 
 # ---------------------------------------------------------------------------
 # Video (YouTube links only): video + sound in one .mp4, never re-encoded.
@@ -274,7 +285,7 @@ def build_ytdlp_command(url, fmt, output_path, ytdlp=None, ffmpeg_location=None,
     cmd = list(ytdlp if ytdlp is not None else ytdlp_manager.current()) + FORMATS[fmt]
     if not video:
         # one download pass (no separate video+audio + merge), one progress ramp
-        cmd += ["-f", "bestaudio/best"]
+        cmd += ["-f", AUDIO_SELECT.get(fmt, DEFAULT_AUDIO_SELECT)]
     cmd += [
         "--newline",      # progress updates as lines, not \r-glued into one blob
         "--no-playlist",  # a track link with ?list= context is still one track
@@ -299,6 +310,120 @@ def build_ytdlp_command(url, fmt, output_path, ytdlp=None, ffmpeg_location=None,
         cmd += ["--ffmpeg-location", ffmpeg_location]
     cmd += ["--", url]
     return cmd
+
+
+# ---------------------------------------------------------------------------
+# What a link's audio really is, asked before the download, so the format chip
+# offers only what makes sense. A lossy source gets no better by becoming
+# flac/wav, and an mp3 source is copied as is, so a "320" of Bandcamp's 128k
+# mp3 would only be a wrong name. Free sources top out at:
+#   bandcamp mp3 128k (320 / flac only with a purchase)
+#   youtube  opus ~150k, aac ~130k
+#   soundcloud aac 160k (or the uploader's original file, if downloads are on)
+# ---------------------------------------------------------------------------
+PROBE_TIMEOUT = 30
+PROBE_CACHE_SIZE = 64
+LOSSLESS_CODECS = ("flac", "alac", "pcm", "wav", "aiff")
+LOSSLESS_EXTS = {"flac", "wav", "aif", "aiff", "alac"}
+MP3_320_FROM = 256  # an mp3 source at least this good counts as the 320 one
+
+
+def probe_command(url, ytdlp=None):
+    """yt-dlp asked which stream a download would take; for an album, of its first track."""
+    return list(ytdlp if ytdlp is not None else ytdlp_manager.current()) + [
+        "--ignore-config", "--no-warnings", "--no-colors", "--skip-download",
+        "-J", "-f", DEFAULT_AUDIO_SELECT,
+        "--no-playlist", "--playlist-items", "1",
+        "--", url,
+    ]
+
+
+def _first_entry(info):
+    """The track a playlist's -J describes: itself, or its first resolved entry."""
+    while isinstance(info, dict) and not info.get("formats") and info.get("entries"):
+        info = next((e for e in info["entries"] if isinstance(e, dict)), None)
+    return info if isinstance(info, dict) else None
+
+
+def source_quality(info):
+    """{"kind": lossless | mp3 | lossy, "kbps": int | None, "site": str} of a -J, or None."""
+    entry = _first_entry(info)
+    if not entry:
+        return None
+    acodec = str(entry.get("acodec") or "").lower()
+    ext = str(entry.get("ext") or "").lower()
+    if acodec == "none":
+        return None  # no audio stream chosen: nothing to go on
+    kbps = entry.get("abr") or entry.get("tbr")
+    kbps = round(kbps) if isinstance(kbps, (int, float)) and kbps > 0 else None
+    if acodec.startswith(LOSSLESS_CODECS) or (not acodec and ext in LOSSLESS_EXTS):
+        kind = "lossless"
+    elif acodec == "mp3" or (not acodec and ext == "mp3"):
+        kind = "mp3"
+    elif acodec or ext:
+        kind = "lossy"
+    else:
+        return None
+    site = str(entry.get("extractor_key") or info.get("extractor_key") or "").lower()
+    return {"kind": kind, "kbps": kbps, "site": site}
+
+
+def offered_formats(source):
+    """(audio formats worth offering, the best of them) for a source; None = unknown, offer all."""
+    if not source:
+        return list(AUDIO_FORMATS), None
+    if source["kind"] == "lossless":
+        return list(AUDIO_FORMATS), "flac"
+    if source["kind"] == "mp3":
+        if source["kbps"] is None:
+            return ["mp3_128", "mp3_320"], "mp3_320"
+        best = "mp3_320" if source["kbps"] >= MP3_320_FROM else "mp3_128"
+        return [best], best
+    # opus / aac / vorbis: mp3 320 keeps the most of it, aac is a copy when the source has one
+    return ["mp3_128", "mp3_320", "aac"], "mp3_320"
+
+
+def probe_source(url, run=subprocess.run, ytdlp=None):
+    """{"formats", "best", "source"} for a link; formats None when it could not be told."""
+    unknown = {"formats": None, "best": None, "source": None}
+    try:
+        r = run(probe_command(url, ytdlp), capture_output=True, timeout=PROBE_TIMEOUT,
+                stdin=subprocess.DEVNULL, **child_popen_kwargs())
+    except (OSError, subprocess.SubprocessError):
+        return unknown
+    if r.returncode != 0:
+        return unknown
+    try:
+        info = json.loads(r.stdout.decode("utf-8", errors="replace"))
+    except ValueError:
+        return unknown
+    source = source_quality(info) if isinstance(info, dict) else None
+    if not source:
+        return unknown
+    formats, best = offered_formats(source)
+    return {"formats": formats, "best": best, "source": source}
+
+
+_probe_cache = collections.OrderedDict()
+_probe_lock = threading.Lock()
+
+
+def cached_probe(url):
+    with _probe_lock:
+        if url in _probe_cache:
+            _probe_cache.move_to_end(url)
+            return _probe_cache[url]
+    ytdlp_manager.begin_download()  # an update must not swap yt-dlp mid-probe
+    try:
+        result = probe_source(url)
+    finally:
+        ytdlp_manager.end_download()
+    if result["formats"] is not None:  # a failure (offline, timeout) is asked again next time
+        with _probe_lock:
+            _probe_cache[url] = result
+            while len(_probe_cache) > PROBE_CACHE_SIZE:
+                _probe_cache.popitem(last=False)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1185,6 +1310,19 @@ def download():
         history.pop()
     ahead = downloads.submit(item)
     return jsonify({"stream_id": stream_id, "ahead": ahead})
+
+
+@app.route("/probe", methods=["POST"])
+def probe():
+    """Which audio formats make sense for a link, and why (see probe_source)."""
+    data = request.get_json(silent=True) or {}
+    url = data.get("url", "")
+    url = url.strip() if isinstance(url, str) else ""
+    # Spotify goes through Deezer, which has its own fixed qualities
+    host = _link_host(url) if url and len(url) <= 2048 else None
+    if not host or not re.fullmatch(r"[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}", host, re.I) or spotify_link(url):
+        return jsonify({"formats": None, "best": None, "source": None})
+    return jsonify(cached_probe(url))
 
 
 @app.route("/cancel/<int:stream_id>", methods=["POST"])
