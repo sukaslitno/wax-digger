@@ -123,13 +123,13 @@ img { display: block; }
 /* opacity lives on the leaves, so no ancestor of the glass becomes a backdrop root */
 .art__slot img, .art__glass { animation: appear 1.1s ease-out both; animation-delay: inherit; }
 .art__sway, .art__box { position: absolute; inset: 0; }
-.art__sway { animation: bob 7s ease-in-out 2s infinite alternate, tilt 9s ease-in-out 2s infinite alternate; }
-.art__slot--a .art__sway { animation-duration: 8s, 10.5s; animation-delay: 2.4s, 2.4s; }
-.art__slot--x .art__sway { animation-duration: 6.5s, 8.5s; animation-delay: 2.8s, 2.8s; animation-direction: alternate-reverse; }
+.art__sway { animation: bob 4.2s ease-in-out 1.6s infinite alternate both, tilt 5.6s ease-in-out 1.6s infinite alternate both; }
+.art__slot--a .art__sway { animation-duration: 5s, 6.4s; animation-delay: 1.9s, 1.9s; }
+.art__slot--x .art__sway { animation-duration: 3.8s, 5.2s; animation-delay: 2.2s, 2.2s; animation-direction: alternate-reverse; }
 @keyframes rise { from { translate: 0 42%; } }
 @keyframes appear { from { opacity: 0; } }
-@keyframes bob { from { translate: 0 -1.6%; } to { translate: 0 1.6%; } }
-@keyframes tilt { from { rotate: -2.2deg; } to { rotate: 2.2deg; } }
+@keyframes bob { from { translate: 0 -4.5%; } to { translate: 0 4.5%; } }
+@keyframes tilt { from { rotate: -5deg; } to { rotate: 5deg; } }
 
 .art__w { transform: rotate(-90deg); }
 .art__w img { position: absolute; left: 7.61%; top: 0; width: 84.89%; height: 100%; }
@@ -170,6 +170,8 @@ img { display: block; }
 @keyframes blink { 50% { opacity: 0; } }
 .m-chip { transition: opacity .3s ease, transform .3s cubic-bezier(.22,1,.36,1); }
 .m-chip[data-hidden="true"] { opacity: 0; transform: scale(.85); }
+.m-chip.pop { animation: pop-chip .32s cubic-bezier(.3,1.6,.5,1); }
+@keyframes pop-chip { 40% { transform: scale(1.12); filter: brightness(1.5); } }
 .m-btn--grab { transition: opacity .3s ease, transform .15s ease; }
 .m-btn--grab[data-state="off"] { opacity: .24; }
 .m-btn--grab[data-state="white"] { background: var(--g-gray); color: var(--white); }
@@ -299,7 +301,7 @@ img { display: block; }
         <div class="m-input m-input--full">
           <span class="ic"><img src="/assets/img/ic-link.svg" alt=""></span>
           <span class="m-input__text m-fade" id="mUrl"></span>
-          <span class="m-btn m-chip" id="mChip" data-hidden="true">mp3 320k</span>
+          <span class="m-btn m-chip" id="mChip" data-hidden="true"></span>
         </div>
         <div class="mock__row">
           <div class="m-input m-input--path">
@@ -442,7 +444,8 @@ img { display: block; }
   const LINK = "https://open.spotify.com/album/0DtvntV6nxS2sWdtjBgDcL?si=g3EV24eeRdqr3otth8xCOQ";
   const PATHS = ["~/Music/wax", "~/Desktop/digs", "~/Music/vinyl", "~/Downloads/crate", "D:\\music\\wax", "~/Music/fresh cuts"];
   const mock = document.getElementById("mock");
-  const M = { url: "", path: "", caret: "", chip: false, action: "off", phase: "idle" };
+  const FMTS = ["mp3 128k", "mp3 320k", "flac"];  // what the app offers for a spotify link
+  const M = { url: "", path: "", caret: "", chip: false, fmt: 0, action: "off", phase: "idle" };
   const $ = id => document.getElementById(id);
 
   function field(node, value, placeholder, caret) {
@@ -457,6 +460,7 @@ img { display: block; }
     field($("mUrl"), M.url, t["app.url"], M.caret === "url");
     field($("mPath"), M.path, t["app.folder"], M.caret === "path");
     $("mChip").dataset.hidden = String(!M.chip);
+    $("mChip").textContent = FMTS[M.fmt];
     $("mBrowse").textContent = t["app.browse"];
     const a = $("mAction");
     a.dataset.state = M.phase === "busy" || M.phase === "done" ? "white" : M.action;
@@ -484,7 +488,7 @@ img { display: block; }
     let lastPath = "";
     for (;;) {
       await waitVisible();
-      Object.assign(M, { url: "", path: "", caret: "", chip: false, action: "off", phase: "idle" });
+      Object.assign(M, { url: "", path: "", caret: "", chip: false, fmt: 0, action: "off", phase: "idle" });
       mock.style.setProperty("--p", 0);
       mock.dataset.clearing = "false";
       renderMock();
@@ -493,7 +497,15 @@ img { display: block; }
       M.caret = "url"; renderMock(); await sleep(600);
       await type("url", LINK, 16);
       M.caret = ""; M.chip = true; renderMock();
-      await sleep(700);
+      await sleep(900);
+      // click the chip up to flac
+      const chip = $("mChip");
+      while (M.fmt < FMTS.length - 1) {
+        chip.classList.remove("pop"); void chip.offsetWidth; chip.classList.add("pop");
+        await sleep(120);
+        M.fmt++; renderMock();
+        await sleep(650);
+      }
 
       let path;
       do { path = PATHS[Math.floor(Math.random() * PATHS.length)]; } while (path === lastPath);
@@ -522,7 +534,7 @@ img { display: block; }
 
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (reduce) {
-    Object.assign(M, { url: LINK, path: PATHS[0], chip: true, action: "on" });
+    Object.assign(M, { url: LINK, path: PATHS[0], chip: true, fmt: FMTS.length - 1, action: "on" });
     renderMock();
   } else {
     new IntersectionObserver(es => { visible = es.some(e => e.isIntersecting); }, { threshold: .35 }).observe(mock);
