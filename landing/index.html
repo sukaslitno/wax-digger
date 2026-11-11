@@ -234,6 +234,7 @@ img { display: block; }
 .modal__close:hover { opacity: .7; }
 .modal__close:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 .modal__close .ic { pointer-events: none; }
+.modal__note { display: none; color: var(--red); font-size: 14px; font-style: italic; text-align: center; }
 .modal__row { display: flex; gap: 4px; }
 .modal__row .pill { flex: 1 0 0; min-width: 0; height: 64px; padding: 2px 24px; }
 
@@ -260,6 +261,8 @@ img { display: block; }
   .foot { margin-top: 63px; padding-bottom: 64px; }
 
   .modal { padding: 24px; border-radius: 32px; }
+  .modal__inner { gap: 16px; }
+  .modal__note { display: block; }
   .modal__close { top: 24px; right: 24px; }
   .modal__row { flex-direction: column; }
   .modal__row .pill { flex: none; width: 100%; }
@@ -344,6 +347,7 @@ img { display: block; }
 <dialog class="modal" id="downloadModal" aria-labelledby="modalTitle">
   <div class="modal__inner">
     <p class="modal__title" id="modalTitle" data-i18n="modal.title">выбери платформу:</p>
+    <p class="modal__note" data-i18n="modal.note">на тилибоне нет..., но скачать можно</p>
     <div class="modal__row">
       <a class="pill" id="dlMac" href="https://github.com/sukaslitno/wax-digger/releases/latest/download/WaxDigger.dmg">
         <span class="ic"><img src="/assets/img/ic-apple.svg" alt=""></span>MAC
@@ -371,6 +375,7 @@ img { display: block; }
       "get.btn": "скачать wax",
       "social.title": "другие проекты и соц.сети:",
       "modal.title": "выбери платформу:",
+      "modal.note": "на тилибоне нет..., но скачать можно",
       "aria.lang": "switch to english",
       "aria.close": "закрыть",
       "aria.donate": "поддержать",
@@ -390,6 +395,7 @@ img { display: block; }
       "get.btn": "download wax",
       "social.title": "other projects and socials:",
       "modal.title": "choose your platform:",
+      "modal.note": "not on phones..., but you can download",
       "aria.lang": "переключить на русский",
       "aria.close": "close",
       "aria.donate": "donate",
