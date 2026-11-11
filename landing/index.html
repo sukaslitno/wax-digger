@@ -186,6 +186,8 @@ img { display: block; }
   border-radius: 999em; background: var(--g-input); min-width: 0;
 }
 .m-input--full { width: 100%; }
+/* easter egg: the link field quietly opens the album, with no hover hint */
+.m-egg { pointer-events: auto; cursor: default; color: inherit; -webkit-tap-highlight-color: transparent; }
 .m-input--path { width: 26.94em; flex: none; }
 .m-input .ic { width: 1.5em; height: 1.5em; }
 .m-input__text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
@@ -301,11 +303,11 @@ img { display: block; }
       <svg class="m-progress" viewBox="0 0 600 300" preserveAspectRatio="none"><path pathLength="100" d="M350 3H536A61 61 0 0 1 597 64V236A61 61 0 0 1 536 297H64A61 61 0 0 1 3 236V64A61 61 0 0 1 64 3H360"/></svg>
       <div class="m-glow"></div>
       <div class="mock__rows">
-        <div class="m-input m-input--full">
-          <span class="ic"><img src="/assets/img/ic-link.svg" alt=""></span>
+        <a class="m-input m-input--full m-egg" href="https://open.spotify.com/album/0DtvntV6nxS2sWdtjBgDcL" target="_blank" rel="noopener" tabindex="-1" draggable="false">
+          <span class="ic"><img src="/assets/img/ic-link.svg" alt="" draggable="false"></span>
           <span class="m-input__text m-fade" id="mUrl"></span>
           <span class="m-btn m-chip" id="mChip" data-hidden="true"></span>
-        </div>
+        </a>
         <div class="mock__row">
           <div class="m-input m-input--path">
             <span class="ic ic--inset"><img src="/assets/img/ic-folder.svg" alt=""></span>
