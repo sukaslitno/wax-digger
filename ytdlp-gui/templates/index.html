@@ -117,6 +117,14 @@ html, body {
 }
 .input input::placeholder { color: rgba(255, 255, 255, .48); }
 .input__chip { height: 48px; }
+/* clears the link field; shown only while it holds something */
+.input__clear {
+  display: inline-flex; flex-shrink: 0; margin-right: -4px;
+  border: 0; background: none; padding: 0; cursor: pointer; color: #fff;
+  opacity: .48; transition: opacity .15s ease;
+}
+.input__clear:hover, .input__clear:focus-visible { opacity: 1; }
+.input__clear:focus-visible { outline: none; }
 /* two chips side by side keep the 4px gap of buttons in a row (folder, info) */
 .input__chip--lead { margin-right: -12px; }
 
@@ -126,6 +134,7 @@ html, body {
 }
 .input[data-state="error"] .input__icon { color: var(--red); }
 .input[data-state="error"] input { color: var(--red); }
+.input[data-state="error"] .input__clear { color: var(--red); }
 .input[data-state="error"] .input__chip { opacity: .24; pointer-events: none; }
 
 /* ===== layout ===== */
@@ -188,9 +197,7 @@ html, body {
 .wintools__bar {
   position: absolute; top: 20px; z-index: 16;
   display: flex; align-items: center;
-  opacity: 0; pointer-events: none; transition: opacity .15s ease;
 }
-.wintools__bar.is-visible { opacity: 1; pointer-events: auto; }
 .wintools__btn { border: 0; background: none; padding: 0; cursor: pointer; display: flex; }
 .wintools__dot, .wintools__ic { display: none; }
 
@@ -215,8 +222,9 @@ html, body {
 .wintools__btn:hover .wintools__ic { opacity: 1; }
 .wintools__btn--close:hover .wintools__ic { color: var(--red); }
 
-/* the (i)/(x) corner would collide with the close button on Windows */
-.modal[data-tools="on"] .modal__corner { opacity: 0; pointer-events: none; }
+/* Windows has close/minimize in the top right, where the (i)/(x) corner is:
+   the corner takes the free top left instead, level with them */
+.modal[data-os="win"] .modal__corner { top: 20px; right: auto; left: 24px; }
 
 [hidden] { display: none !important; }
 .locked { pointer-events: none; }
@@ -245,6 +253,14 @@ html, body {
         </svg>
       </span>
       <input id="url" type="text" data-i18n-placeholder="url.placeholder" autocomplete="off" spellcheck="false">
+      <button type="button" class="input__clear" id="urlClear" data-i18n-aria="aria.clear" hidden>
+        <span class="ic24">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path opacity="0.5" d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M14.5 9.5L9.5 14.5M9.5 9.5L14.5 14.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </span>
+      </button>
       <button type="button" class="btn btn--white input__chip input__chip--lead" id="modeChip" hidden></button>
       <button type="button" class="btn btn--white input__chip" id="fmtChip"></button>
     </label>
@@ -358,7 +374,7 @@ html, body {
     "url.placeholder": "paste a track / album / playlist link",
     "folder.placeholder": "output folder",
     "browse": "browse",
-    "deezer.arl": "deezer arl",
+    "deezer.arl": "deezer arl: the arl cookie from deezer.com",
     "deezer.arl_change": "deezer arl (change session)",
     "connect": "connect",
     "deezer.added": "deezer session added for this launch",
@@ -380,6 +396,10 @@ html, body {
     "st.links_saved": ["{saved} of {n} link saved", "{saved} of {n} links saved"],
     "err.generic": "couldn't grab this one",
     "drm": "{name} is drm-locked — try bandcamp, youtube or spotify",
+    "q.bandcamp": "bandcamp gives only mp3 128k for free, 320 and flac after purchase",
+    "q.mp3": "the source only has mp3 {n}k — saved as is, nothing higher",
+    "q.lossy": "the source streams ~{n}k: the ceiling, flac and wav won't add to it",
+    "q.lossy_any": "the source streams compressed audio: flac and wav won't add to it",
     "details.more": " · details",
     "copy": "copy",
     "copied": "copied",
@@ -394,6 +414,7 @@ html, body {
     "made": "made by jeneverbes",
     "aria.info": "info",
     "aria.close": "close",
+    "aria.clear": "clear the link",
     "aria.minimize": "minimize",
     "aria.donate": "donate",
     "aria.language": "language"
@@ -404,7 +425,7 @@ html, body {
     "url.placeholder": "ссылка на трек / альбом / плейлист",
     "folder.placeholder": "куда сохранять",
     "browse": "выбрать",
-    "deezer.arl": "deezer arl",
+    "deezer.arl": "deezer arl: cookie arl с deezer.com",
     "deezer.arl_change": "deezer arl (новая сессия)",
     "connect": "подключить",
     "deezer.added": "deezer подключён до перезапуска",
@@ -426,6 +447,10 @@ html, body {
     "st.links_saved": ["готово {saved} из {n} ссылки", "готово {saved} из {n} ссылок", "готово {saved} из {n} ссылок"],
     "err.generic": "не вышло скачать",
     "drm": "{name} под drm — бери с bandcamp, youtube или spotify",
+    "q.bandcamp": "bandcamp бесплатно даёт только mp3 128k, 320 и flac — после покупки",
+    "q.mp3": "у источника только mp3 {n}k — качаю как есть, выше не бывает",
+    "q.lossy": "источник отдаёт ~{n}k — это потолок, flac и wav его не улучшат",
+    "q.lossy_any": "источник отдаёт сжатый звук — flac и wav его не улучшат",
     "details.more": " · подробнее",
     "copy": "скопировать",
     "copied": "скопировано",
@@ -440,6 +465,7 @@ html, body {
     "made": "сделал jeneverbes",
     "aria.info": "инфо",
     "aria.close": "закрыть",
+    "aria.clear": "стереть ссылку",
     "aria.minimize": "свернуть",
     "aria.donate": "поддержать",
     "aria.language": "язык"
@@ -525,7 +551,11 @@ const el = (id) => document.getElementById(id);
 const urlEl = el("url"), folderEl = el("folder"), actionBtn = el("actionBtn");
 const progressEl = el("progress"), urlInput = el("urlInput");
 
-let fmtIndex = 1;  // mp3 320k
+let fmtKey = "mp3_320";  // the audio format chosen; narrowed to what the link's source has
+let fmtTouchedFor = "";  // the link the chip was picked by hand for: its probe keeps that choice
+// What each link's audio really is (/probe): url -> {formats, best, source}.
+const probes = new Map();
+let probeTimer = 0;
 let videoMode = false;   // the audio / video chip; only YouTube links show it
 let videoIndex = 3;      // 1080p: the best that is still H.264, which plays everywhere
 let phase = "idle";      // idle | busy | done | cancelled | error
@@ -563,10 +593,86 @@ function isYouTubeVideo(value) {
 
 function videoChosen() { return videoMode && isYouTubeVideo(urlEl.value); }
 
-function availableFormats() { return isSpotify(urlEl.value) ? FORMATS.slice(0, 3) : FORMATS; }
+// The probe of the link in the field, once it has answered.
+function probeOf(value) {
+  const p = probes.get(value.trim());
+  return p && !p.then ? p : null;
+}
+
+// Spotify has Deezer's three; any other link what its source makes worth it
+// (no flac of a lossy stream, no "320" of a 128k mp3); all until it is known.
+function availableFormats() {
+  if (isSpotify(urlEl.value)) return FORMATS.slice(0, 3);
+  const p = probeOf(urlEl.value);
+  return p && p.formats ? FORMATS.filter(([key]) => p.formats.includes(key)) : FORMATS;
+}
+
+// Keep the chosen format if the link has it, else take the link's best.
+function fitFormat() {
+  const offered = availableFormats();
+  if (offered.some(([key]) => key === fmtKey)) return;
+  const p = !isSpotify(urlEl.value) && probeOf(urlEl.value);
+  const best = p && p.best;
+  fmtKey = (offered.find(([key]) => key === best) || offered.find(([key]) => key === "mp3_320") || offered[0])[0];
+}
 
 // [backend key, chip label] of what the chips are set to for the link in the field
-function chosenFormat() { return videoChosen() ? VIDEO_FORMATS[videoIndex] : FORMATS[fmtIndex]; }
+function chosenFormat() {
+  return videoChosen() ? VIDEO_FORMATS[videoIndex] : FORMATS.find(([key]) => key === fmtKey) || FORMATS[1];
+}
+
+// Ask the server what the link's audio is. The answer narrows the chip and,
+// unless the chip was picked by hand, sets it to the best the source has.
+function probeLater() {
+  clearTimeout(probeTimer);
+  const url = urlEl.value.trim();
+  if (!isLikelyUrl(url) || isSpotify(url) || urlInvalid || probes.has(url)) return;
+  probeTimer = setTimeout(() => startProbe(url), 300);
+}
+
+function startProbe(url) {
+  if (probes.has(url)) return probes.get(url);
+  const pending = fetch("/probe", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }),
+  }).then((r) => r.json()).catch(() => null).then((p) => {
+    if (p && p.formats) probes.set(url, p);
+    else probes.delete(url);  // unknown: offer all, ask again for the next paste
+    probed(url, p && p.formats ? p : null);
+    return p;
+  });
+  probes.set(url, pending);
+  return pending;
+}
+
+function probed(url, p) {
+  // the chip belongs to a running download while the field holds its link
+  const free = phase === "idle" || (phase === "busy" && busyAction() === "add");
+  if (!p || urlEl.value.trim() !== url || !free) { render(); return; }
+  if (fmtTouchedFor !== url && p.best) fmtKey = p.best;
+  fitFormat();
+  render();
+}
+
+// Wait (a little) for the probe of a link about to be grabbed, so it does not
+// start with a format its source cannot back.
+function probeSettled(url, ms) {
+  const pending = probes.get(url);
+  if (!pending || !pending.then) return Promise.resolve();
+  return Promise.race([pending, new Promise((done) => setTimeout(done, ms))]);
+}
+
+// Why the chip offers what it does: what the source really gives.
+function qualityNote() {
+  if (videoChosen() || isSpotify(urlEl.value)) return "";
+  const p = probeOf(urlEl.value);
+  const s = p && p.source;
+  if (!s || s.kind === "lossless") return "";
+  if (s.kind === "mp3") {
+    if (/^bandcamp/.test(s.site) && (!s.kbps || s.kbps <= 128)) return t("q.bandcamp");
+    return s.kbps ? t("q.mp3", { n: s.kbps }) : "";
+  }
+  return s.kbps ? t("q.lossy", { n: s.kbps }) : t("q.lossy_any");
+}
 
 // Returns the bridge call's promise, or null when running in a plain browser.
 function api(name, ...args) {
@@ -607,10 +713,11 @@ function render() {
   const action = phase === "busy" ? busyAction() : "";
   // the filled screen stays while anything runs, even with the field emptied
   const filled = hasUrl || phase !== "idle";
-  if (spotify && fmtIndex > 2) fmtIndex = 0;
+  fitFormat();
   el("modeChip").hidden = !isYouTubeVideo(urlEl.value);
   el("modeChip").textContent = t(videoMode ? "mode.video" : "mode.audio");
   el("fmtChip").textContent = chosenFormat()[1];
+  el("urlClear").hidden = !urlEl.value;
 
   if (details && !hasDetails()) details = false;
   const screen = info || details;  // a screen over the main one, closed by the corner (x)
@@ -652,7 +759,9 @@ function render() {
   // a link that cannot work says why, until a download has something to report
   const drm = urlInvalid && phase !== "busy" ? drmMessage(drmName) : "";
   const shown = msgText(statusMessage);
-  const status = drm || (shown && queued > 0 ? `${shown} · ${t("st.queued", { n: queued })}` : shown);
+  // with nothing else to say, the line tells why the chip offers what it does
+  const note = !drm && !shown && (phase === "idle" || action === "add") && hasUrl ? qualityNote() : "";
+  const status = drm || (shown && queued > 0 ? `${shown} · ${t("st.queued", { n: queued })}` : shown) || note;
   // a failed or partial download offers its details right on the status line
   const more = !drm && hasDetails();
   el("downloadStatus").hidden = screen || !status;
@@ -661,7 +770,8 @@ function render() {
   el("downloadStatus").dataset.more = String(more);
   el("downloadStatus").tabIndex = more ? 0 : -1;
   el("downloadStatus").dataset.error = String(!!drm || statusError);
-  el("downloadStatus").dataset.clip = String(phase === "done");
+  el("downloadStatus").dataset.clip = String(phase === "done" || !!note);
+  el("downloadStatus").title = note;
   el("infoMade").textContent = [t("made"), appVersion && "v" + appVersion,
     ytdlpVersion && "yt-dlp " + ytdlpVersion].filter(Boolean).join(" · ");
   el("langBtn").textContent = lang;
@@ -680,7 +790,12 @@ function setProgress(pct) {
 el("fmtChip").addEventListener("click", () => {
   edited();
   if (videoChosen()) videoIndex = (videoIndex + 1) % VIDEO_FORMATS.length;
-  else fmtIndex = (fmtIndex + 1) % availableFormats().length;
+  else {
+    const offered = availableFormats();
+    const i = offered.findIndex(([key]) => key === fmtKey);
+    fmtKey = offered[(i + 1) % offered.length][0];
+    fmtTouchedFor = urlEl.value.trim();
+  }
   el("fmtChip").textContent = chosenFormat()[1];
 });
 // audio / video: each keeps its own choice, so switching back loses nothing
@@ -754,6 +869,17 @@ async function enqueue() {
   posting = url;
   render();
 
+  // grabbed before the probe answered: give it a moment, then start with the
+  // source's best (or keep the hand-picked format if the source has it)
+  if (!videoChosen() && !isSpotify(url)) {
+    clearTimeout(probeTimer);
+    if (isLikelyUrl(url) && !probes.has(url)) startProbe(url);
+    await probeSettled(url, 8000);
+    const p = probeOf(url);
+    if (p && p.best && fmtTouchedFor !== url && urlEl.value.trim() === url) fmtKey = p.best;
+    fitFormat();
+  }
+
   let stream_id, error;
   try {
     const r = await fetch("/download", {
@@ -775,9 +901,11 @@ async function enqueue() {
     return;
   }
   seenLinks.add(url);
+  fmtTouchedFor = "";  // the next link starts from its own best again
   jobs.push({ id: stream_id, url, out: folderEl.value.trim() });
   if (!first && urlEl.value.trim() === url) { urlEl.value = ""; validate(); }
   if (jobs.length === 1) follow(jobs[0]);
+  try { api("dismiss_link", url); } catch (e) {}  // not offered from the clipboard after a restart
   render();
 }
 
@@ -1115,7 +1243,7 @@ function edited() {
 urlEl.addEventListener("input", () => {
   const v = urlEl.value.trim();
   if (v) handledLink = v;
-  edited(); validate(); render();
+  edited(); validate(); probeLater(); render();
 });
 folderEl.addEventListener("input", () => { edited(); render(); });
 // Enter adds or grabs, but never cancels a download by accident
@@ -1129,9 +1257,11 @@ urlEl.addEventListener("keydown", (e) => {
 function setUrl(link) {
   info = false;
   details = false;
+  filledLink = link;
+  wholeOnClick = true;
   urlEl.value = link;
   handledLink = link;
-  edited(); validate(); render();
+  edited(); validate(); probeLater(); render();
   urlEl.focus();
 }
 
@@ -1155,39 +1285,74 @@ window.addEventListener("drop", (e) => {
   if (link) setUrl(link);
 });
 
-// When the window opens or gains focus with nothing typed, offer a copied link.
-// It only fills the field; starting is the user's call.
+// ===== clearing the link field: the (x) in it, or Esc while it has text =====
+// A link cleared away, or deleted by hand, is not offered from the clipboard
+// again, this launch or the next (the server keeps a short list of them).
+let filledLink = "";     // the link last put in the field from outside or pasted
+function dismissLink(link) {
+  link = (link || "").trim();
+  if (!link) return;
+  seenLinks.add(link);
+  try { api("dismiss_link", link); } catch (e) {}
+}
+
+function clearUrl() {
+  dismissLink(urlEl.value);
+  dismissLink(filledLink);
+  filledLink = "";
+  urlEl.value = "";
+  edited(); validate(); render();
+  urlEl.focus();
+}
+
+el("urlClear").addEventListener("click", (e) => { e.preventDefault(); clearUrl(); });
+urlEl.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || !urlEl.value) return;
+  e.preventDefault();
+  e.stopPropagation();  // Esc on an empty field still closes the window
+  clearUrl();
+});
+urlEl.addEventListener("paste", () => {
+  setTimeout(() => { if (isLikelyUrl(urlEl.value)) filledLink = urlEl.value.trim(); }, 0);
+});
+urlEl.addEventListener("input", () => {
+  wholeOnClick = false;
+  if (!urlEl.value.trim() && filledLink) { dismissLink(filledLink); filledLink = ""; }
+});
+
+// The first click on a link put in from outside takes it whole, so the next
+// paste replaces it; later clicks place the caret as usual.
+let wholeOnClick = true;
+window.addEventListener("blur", () => { wholeOnClick = true; });
+urlEl.addEventListener("mouseup", () => {
+  if (!wholeOnClick) return;
+  wholeOnClick = false;
+  if (urlEl.value && urlEl.selectionStart === urlEl.selectionEnd) urlEl.select();
+});
+
+// When the window opens or gains focus, offer a copied link. It only fills the
+// field; starting is the user's call. A link already handed to the server is
+// done with, so a newly copied one takes its place (one link after another
+// needs no clearing); anything else in the field is kept.
 let prefilling = false;
+function replaceable() {
+  if (phase === "cancelled") return false;
+  const v = urlEl.value.trim();
+  return !v || (seenLinks.has(v) && v !== posting);
+}
 async function prefillFromClipboard() {
-  if (prefilling || phase !== "idle" || urlEl.value.trim()) return;
+  if (prefilling || !replaceable()) return;
   prefilling = true;
   try {
     const link = await api("clipboard_url");
-    if (link && link !== handledLink && !seenLinks.has(link) && phase === "idle" && !urlEl.value.trim()) setUrl(link);
+    if (link && link !== handledLink && !seenLinks.has(link) && link !== urlEl.value.trim() && replaceable()) setUrl(link);
   } catch (e) {} finally { prefilling = false; }
 }
 window.addEventListener("focus", prefillFromClipboard);
 
-// ===== window controls: hover near the top edge reveals close/minimize =====
-const winTools = el("winTools"), winBar = el("winBar");
-let toolsTimer = 0;
-
-function showTools() {
-  clearTimeout(toolsTimer);
-  winBar.classList.add("is-visible");
-  el("modal").dataset.tools = "on";
-}
-
-function hideTools() {
-  clearTimeout(toolsTimer);  // a short grace period so it does not blink
-  toolsTimer = setTimeout(() => {
-    winBar.classList.remove("is-visible");
-    el("modal").dataset.tools = "";
-  }, 300);
-}
-
-winTools.addEventListener("mouseenter", showTools);
-winTools.addEventListener("mouseleave", hideTools);
+// ===== window controls: close/minimize, always in sight =====
+// (they used to show only on hovering the top edge, and closing was a riddle)
+const winTools = el("winTools");
 el("winClose").addEventListener("click", () => api("close_window"));
 el("winMin").addEventListener("click", () => api("minimize"));
 
@@ -1196,7 +1361,7 @@ el("winMin").addEventListener("click", () => api("minimize"));
 async function initTools() {
   try {
     const os = await api("platform");
-    winTools.dataset.os = os === "darwin" ? "mac" : "win";
+    winTools.dataset.os = el("modal").dataset.os = os === "darwin" ? "mac" : "win";
     winTools.hidden = false;
   } catch (e) {}
   render();

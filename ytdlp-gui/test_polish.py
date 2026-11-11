@@ -143,7 +143,7 @@ class PageTests(unittest.TestCase):
             self.assertNotIn(label, page)
         for label in ("Deezer ARL", "Deezer session", "Connect Deezer"):
             self.assertNotIn(label, page)
-        self.assertIn("let fmtIndex = 1;", page)
+        self.assertIn('let fmtKey = "mp3_320";', page)
         self.assertNotIn("setTimeout(reset, 2000)", page)
         for bridge in ("reveal", "clipboard_url"):
             self.assertTrue(callable(getattr(wax.Api, bridge)))

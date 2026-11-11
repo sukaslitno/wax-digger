@@ -78,7 +78,8 @@ class FormatTests(unittest.TestCase):
     def test_audio_commands_are_unchanged(self):
         for fmt in ("mp3_128", "mp3_320", "flac", "wav", "aac"):
             cmd = wax.build_ytdlp_command("https://youtu.be/x", fmt, "/out", ytdlp=["yt-dlp"])
-            self.assertEqual(cmd[1:1 + len(wax.FORMATS[fmt]) + 2], wax.FORMATS[fmt] + ["-f", "bestaudio/best"])
+            select = "bestaudio[acodec^=mp4a]/bestaudio/best" if fmt == "aac" else "bestaudio/best"
+            self.assertEqual(cmd[1:1 + len(wax.FORMATS[fmt]) + 2], wax.FORMATS[fmt] + ["-f", select])
             for absent in ("-S", "--merge-output-format", *wax.VIDEO_RULES):
                 self.assertNotIn(absent, cmd)
 
