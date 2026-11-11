@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wax — скачать любой трек или плейлист</title>
+<meta name="description" content="wax позволит скачать любой трек или плейлист в два клика. Полностью локально и бесплатно. Для macOS и Windows.">
+<meta name="theme-color" content="#000000">
+<meta property="og:type" content="website">
+<meta property="og:title" content="wax">
+<meta property="og:description" content="скачать любой трек или плейлист в два клика — полностью локально и бесплатно">
+<meta property="og:image" content="/assets/og.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/png" href="/assets/favicon.png">
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- DM Mono has no Cyrillic: Russian letters fall back to JetBrains Mono, same as in the app -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:ital@0;1&family=JetBrains+Mono:ital@0;1&display=swap">
+<style>
+:root {
+  --black: #000;
+  --white: #fff;
+  --blue: #68d0ed;
+  --yellow: #d9ef71;
+  --red: #ff4c4d;
+  --card: #0e0e0e;
+  --gutter: 24px;
+  --font: 'DM Mono', 'JetBrains Mono', ui-monospace, monospace;
+
+  /* Button fills from the design: an elliptical radial gradient at 55% */
+  --g-gray:   radial-gradient(ellipse 72.9% 50% at 50% 50%, rgba(0,0,0,.55), rgba(106,106,106,.55));
+  --g-blue:   radial-gradient(ellipse 72.9% 50% at 50% 50%, rgba(0,0,0,.55), rgba(14,74,89,.55));
+  --g-yellow: radial-gradient(ellipse 72.9% 50% at 50% 50%, rgba(0,0,0,.55), rgba(111,123,57,.55));
+  --g-github: radial-gradient(ellipse 72.9% 50% at 50% 50%, rgba(0,0,0,.55), rgba(104,128,237,.55));
+  --g-tg:     radial-gradient(ellipse 72.9% 50% at 50% 50%, rgba(0,0,0,.55), rgba(131,195,255,.55));
+  --g-donate: radial-gradient(ellipse 72.9% 50% at 50% 50%, rgba(0,0,0,.55), rgba(85,191,112,.55));
+  --g-input:  radial-gradient(ellipse 72.9% 50% at 50% 50%, rgba(0,0,0,.16), rgba(106,106,106,.16));
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { color-scheme: dark; -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--black);
+  color: var(--white);
+  font: 400 16px/normal var(--font);
+  letter-spacing: -0.06em;
+  overflow-x: clip;
+  -webkit-font-smoothing: antialiased;
+}
+p { margin: 0; }
+a { color: inherit; text-decoration: none; }
+button { font: inherit; letter-spacing: inherit; color: inherit; border: 0; background: none; padding: 0; cursor: pointer; }
+img { display: block; }
+
+/* ---------- pill button ---------- */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 48px;
+  padding: 2px 16px;
+  border-radius: 999px;
+  overflow: hidden;
+  white-space: nowrap;
+  background: var(--g-gray);
+  transition: filter .18s ease, transform .12s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.pill:hover { filter: brightness(1.35); }
+.pill:active { transform: scale(.97); }
+.pill:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+.pill--blue { background: var(--g-blue); color: var(--blue); }
+.pill--sq { width: 48px; padding: 2px; }
+
+/* 24px icon slot; the image keeps the in-frame offset it has in the design */
+.ic { display: block; position: relative; flex: none; width: 24px; height: 24px; }
+.ic img { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+.ic--github img { left: 0; top: 9.375%; width: 84.375%; height: 84.375%; }
+.ic--inset img { left: 5.208%; top: 5.208%; width: 89.583%; height: 89.583%; }
+.ic--donate img { left: 5.208%; top: 17.708%; width: 89.583%; height: 64.583%; }
+
+/* ---------- layout ---------- */
+.nav {
+  width: min(1040px, 100% - 2 * var(--gutter));
+  margin: 0 auto;
+  padding-top: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.nav__logo { width: 128.64px; height: 48px; }
+.nav__logo img { width: 100%; height: 100%; object-fit: cover; }
+.nav__actions { display: flex; gap: 8px; align-items: center; }
+
+.col { width: min(611px, 100% - 2 * var(--gutter)); margin: 0 auto; text-align: center; }
+
+.hero { margin-top: 100px; display: flex; flex-direction: column; gap: 8px; align-items: center; }
+.hero__title { font-size: 32px; }
+.hero__sub { font-size: 24px; font-style: italic; opacity: .48; }
+.c-blue { color: var(--blue); } .c-yellow { color: var(--yellow); } .c-red { color: var(--red); }
+.ast { color: var(--red); font-size: .645em; }
+.br-m { display: none; }
+
+/* wax illustration — wider than the viewport, like in the design */
+.art {
+  position: relative;
+  width: min(100vw + 49px, 1489px);
+  aspect-ratio: 1489 / 562;
+  margin: 99px 0 0 50%;
+  transform: translateX(-50%);
+  pointer-events: none;
+  user-select: none;
+  container-type: inline-size;
+}
+.art__box { position: absolute; top: .071%; width: 37.69%; aspect-ratio: 1; }
+.art__w { left: 0; transform: rotate(-90deg); }
+.art__w img { position: absolute; left: 7.61%; top: 0; width: 84.89%; height: 100%; }
+.art__a { left: 31.659%; transform: scaleY(-1); }
+.art__a img, .art__glass { position: absolute; left: 0; top: 3.5%; width: 100%; height: 93%; }
+/* the middle shape is frosted glass over the w and the x (Figma background blur) */
+.art__glass {
+  -webkit-backdrop-filter: blur(3.2cqw); backdrop-filter: blur(3.2cqw);
+  -webkit-mask: url(/assets/img/a-shape.svg) center / 100% 100% no-repeat;
+  mask: url(/assets/img/a-shape.svg) center / 100% 100% no-repeat;
+}
+.art__x { position: absolute; left: 64.638%; top: 3.566%; width: 35.051%; aspect-ratio: 1; }
+.art__x img { width: 100%; height: 100%; }
+
+/* app window mock — everything in em, scaled to the card width (600px = 1em·37.5) */
+.mock-wrap { width: min(860px, 100% - 2 * var(--gutter)); margin: 100px auto 0; container-type: inline-size; }
+.mock {
+  font-size: calc(100cqw * 16 / 600);
+  background: var(--card);
+  border-radius: 4em;
+  padding: 2em;
+  display: flex;
+  flex-direction: column;
+  gap: 2em;
+  overflow: hidden;
+  user-select: none;
+}
+.mock__rows { display: flex; flex-direction: column; gap: .75em; }
+.mock__row { display: flex; gap: .25em; }
+.m-input {
+  display: flex; align-items: center; gap: 1em;
+  height: 4em; padding: .5em .5em .5em 1em;
+  border-radius: 999em; background: var(--g-input); min-width: 0;
+}
+.m-input--full { width: 100%; }
+.m-input--path { width: 26.94em; flex: none; }
+.m-input .ic { width: 1.5em; height: 1.5em; }
+.m-input__text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.m-btn {
+  display: flex; align-items: center; justify-content: center;
+  padding: .125em 1.5em; border-radius: 999em; background: var(--g-gray);
+  white-space: nowrap; flex: none;
+}
+.m-input .m-btn { height: 100%; }
+.m-btn--browse { height: 4em; flex: 1; }
+.m-btn--grab { height: 4em; width: 100%; background: var(--g-yellow); color: var(--yellow); }
+
+.get { margin-top: 100px; display: flex; flex-direction: column; gap: 24px; align-items: center; }
+.get__title { font-size: 32px; }
+.get__btn { width: 100%; height: 100px; font-size: 24px; }
+
+.social { margin-top: 100px; display: flex; flex-direction: column; gap: 24px; }
+.social__title { font-size: 24px; }
+.social__row { display: flex; gap: 4px; }
+.social__row .pill { flex: 1 0 0; min-width: 0; height: 64px; padding: 2px 24px; }
+.pill--github { background: var(--g-github); }
+.pill--tg { background: var(--g-tg); }
+.pill--donate { background: var(--g-donate); }
+
+.foot { margin: 99px auto 0; padding-bottom: 40px; font-style: italic; opacity: .32; }
+
+/* ---------- modal ---------- */
+.modal {
+  width: min(600px, 100% - 2 * var(--gutter));
+  max-width: none;
+  padding: 32px;
+  border: 0;
+  border-radius: 48px;
+  background: var(--black);
+  color: var(--white);
+  overflow: hidden;
+}
+.modal::backdrop { background: rgba(0,0,0,.5); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+.modal[open] { animation: pop .22s cubic-bezier(.2,.9,.3,1.15); }
+.modal[open]::backdrop { animation: fade .2s ease; }
+@keyframes pop { from { opacity: 0; transform: scale(.94) translateY(8px); } }
+@keyframes fade { from { opacity: 0; } }
+.modal__inner { display: flex; flex-direction: column; gap: 32px; }
+.modal__title { text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 32px; }
+.modal__close { position: absolute; top: 32px; right: 32px; width: 24px; height: 24px; border-radius: 50%; transition: opacity .18s; }
+.modal__close:hover { opacity: .7; }
+.modal__close:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.modal__close .ic { pointer-events: none; }
+.modal__row { display: flex; gap: 4px; }
+.modal__row .pill { flex: 1 0 0; min-width: 0; height: 64px; padding: 2px 24px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .modal[open], .modal[open]::backdrop { animation: none; }
+  .pill { transition: none; }
+}
+
+/* ---------- mobile ---------- */
+@media (max-width: 640px) {
+  .hero { margin-top: 64px; }
+  .hero__title { font-size: 24px; }
+  .hero__sub { font-size: 16px; }
+  .hero .ast, .br-d { display: none; }
+  .br-m { display: inline; }
+  .art { margin-top: 45px; }
+  .mock-wrap { margin-top: 64px; }
+  .mock { border-radius: 4em; }
+  .get { margin-top: 64px; gap: 16px; }
+  .get__title { font-size: 24px; }
+  .social { margin-top: 63px; }
+  .social__title, .get__title { white-space: nowrap; font-size: min(24px, (100vw - 48px) / (var(--n, 26) * .55)); }
+  .foot { margin-top: 63px; padding-bottom: 64px; }
+
+  .modal { padding: 24px; border-radius: 32px; }
+  .modal__close { top: 24px; right: 24px; }
+  .modal__row { flex-direction: column; }
+  .modal__row .pill { flex: none; width: 100%; }
+}
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <a class="nav__logo" href="/" aria-label="wax">
+    <picture>
+      <source srcset="/assets/logo.webp" type="image/webp">
+      <img src="/assets/logo.png" alt="wax" width="129" height="48">
+    </picture>
+  </a>
+  <div class="nav__actions">
+    <button class="pill pill--sq" type="button" id="langBtn" data-i18n-aria="aria.lang">ru</button>
+    <button class="pill pill--blue" type="button" data-open-download data-i18n="nav.download">скачать</button>
+  </div>
+</header>
+
+<main>
+  <section class="hero col">
+    <h1 class="hero__title" style="margin:0;font-weight:400" data-i18n-html="hero.title"><span class="c-blue">w</span><span class="c-yellow">a</span><span class="c-red">x</span> позволит скачать <br class="br-m">любой<span class="ast">*</span> трек <br class="br-d">или плейлист <br class="br-m">в два клика</h1>
+    <p class="hero__sub" data-i18n="hero.sub">(полностью локально и бесплатно)</p>
+  </section>
+
+  <div class="art" aria-hidden="true">
+    <div class="art__box art__w"><img src="/assets/img/w.svg" alt="" width="476.392" height="561.194"></div>
+    <div class="art__x"><img src="/assets/img/x.svg" alt="" width="521.911" height="521.91"></div>
+    <div class="art__box art__a"><div class="art__glass"></div><img src="/assets/img/a.svg" alt="" width="561.194" height="521.91"></div>
+  </div>
+
+  <div class="mock-wrap" aria-hidden="true">
+    <div class="mock">
+      <div class="mock__rows">
+        <div class="m-input m-input--full">
+          <span class="ic"><img src="/assets/img/ic-link.svg" alt=""></span>
+          <span class="m-input__text">https://icones.js.org/collection/solar?variant=Duotone&amp;s=download&amp;icon=solar:download-square-bold-duotone</span>
+          <span class="m-btn">MP3 128K</span>
+        </div>
+        <div class="mock__row">
+          <div class="m-input m-input--path">
+            <span class="ic ic--inset"><img src="/assets/img/ic-folder.svg" alt=""></span>
+            <span class="m-input__text">[path_name]</span>
+          </div>
+          <span class="m-btn m-btn--browse">browse</span>
+        </div>
+      </div>
+      <span class="m-btn m-btn--grab">GRAB THE WAX</span>
+    </div>
+  </div>
+
+  <section class="get col">
+    <h2 class="get__title" style="margin:0;font-weight:400" data-i18n="get.title">доступно на мак и винду</h2>
+    <button class="pill pill--blue get__btn" type="button" data-open-download data-i18n="get.btn">скачать wax</button>
+  </section>
+
+  <section class="social col">
+    <h2 class="social__title" style="margin:0;font-weight:400" data-i18n="social.title">другие проекты и соц.сети:</h2>
+    <div class="social__row">
+      <a class="pill pill--github" href="https://github.com/sukaslitno/wax-digger" target="_blank" rel="noopener" aria-label="GitHub">
+        <span class="ic ic--github"><img src="/assets/img/ic-github.svg" alt=""></span>
+      </a>
+      <a class="pill" href="https://x.com/verbazilla" target="_blank" rel="noopener" aria-label="X">
+        <span class="ic"><img src="/assets/img/ic-x.svg" alt=""></span>
+      </a>
+      <a class="pill pill--tg" href="https://t.me/insideverbes" target="_blank" rel="noopener" aria-label="Telegram">
+        <span class="ic ic--inset"><img src="/assets/img/ic-telegram.svg" alt=""></span>
+      </a>
+      <a class="pill pill--donate" href="https://pay.cloudtips.ru/p/2f3e88eb" target="_blank" rel="noopener" data-i18n-aria="aria.donate" aria-label="поддержать">
+        <span class="ic ic--donate"><img src="/assets/img/ic-donate.svg" alt=""></span>
+      </a>
+    </div>
+  </section>
+</main>
+
+<footer class="foot col">2026. prod. by jeneverbes</footer>
+
+<dialog class="modal" id="downloadModal" aria-labelledby="modalTitle">
+  <div class="modal__inner">
+    <p class="modal__title" id="modalTitle" data-i18n="modal.title">выбери платформу:</p>
+    <div class="modal__row">
+      <a class="pill" id="dlMac" href="https://github.com/sukaslitno/wax-digger/releases/latest/download/WaxDigger.dmg">
+        <span class="ic"><img src="/assets/img/ic-apple.svg" alt=""></span>MAC
+      </a>
+      <a class="pill" id="dlWin" href="https://github.com/sukaslitno/wax-digger/releases/latest/download/WaxDigger.exe">
+        <span class="ic"><img src="/assets/img/ic-windows.svg" alt=""></span>WINDOWS
+      </a>
+    </div>
+  </div>
+  <button class="modal__close" type="button" id="modalClose" data-i18n-aria="aria.close" aria-label="закрыть">
+    <span class="ic ic--inset"><img src="/assets/img/ic-close.svg" alt=""></span>
+  </button>
+</dialog>
+
+<script>
+(() => {
+  const WAX = '<span class="c-blue">w</span><span class="c-yellow">a</span><span class="c-red">x</span>';
+  const STRINGS = {
+    ru: {
+      "doc.title": "wax — скачать любой трек или плейлист",
+      "hero.title": `${WAX} позволит скачать <br class="br-m">любой<span class="ast">*</span> трек <br class="br-d">или плейлист <br class="br-m">в два клика`,
+      "hero.sub": "(полностью локально и бесплатно)",
+      "nav.download": "скачать",
+      "get.title": "доступно на мак и винду",
+      "get.btn": "скачать wax",
+      "social.title": "другие проекты и соц.сети:",
+      "modal.title": "выбери платформу:",
+      "aria.lang": "switch to english",
+      "aria.close": "закрыть",
+      "aria.donate": "поддержать",
+    },
+    en: {
+      "doc.title": "wax — download any track or playlist",
+      "hero.title": `${WAX} lets you download <br class="br-m">any<span class="ast">*</span> track <br class="br-d">or playlist <br class="br-m">in two clicks`,
+      "hero.sub": "(fully local and free)",
+      "nav.download": "download",
+      "get.title": "available on mac and windows",
+      "get.btn": "download wax",
+      "social.title": "other projects and socials:",
+      "modal.title": "choose your platform:",
+      "aria.lang": "переключить на русский",
+      "aria.close": "close",
+      "aria.donate": "donate",
+    },
+  };
+
+  const store = {
+    get() { try { return localStorage.getItem("wax-lang"); } catch { return null; } },
+    set(v) { try { localStorage.setItem("wax-lang", v); } catch {} },
+  };
+
+  function pickLang() {
+    const q = new URLSearchParams(location.search).get("lang");
+    if (q && STRINGS[q]) return q;
+    const saved = store.get();
+    if (saved && STRINGS[saved]) return saved;
+    return (navigator.languages || [navigator.language || ""]).some(l => /^(ru|uk|be|kk)\b/i.test(l)) ? "ru" : "en";
+  }
+
+  let lang = pickLang();
+  const langBtn = document.getElementById("langBtn");
+
+  function apply() {
+    const t = STRINGS[lang];
+    document.documentElement.lang = lang;
+    document.title = t["doc.title"];
+    document.querySelectorAll("[data-i18n]").forEach(n => { n.textContent = t[n.dataset.i18n]; });
+    // one-line mobile titles shrink to fit their character count
+    document.querySelectorAll(".get__title, .social__title").forEach(n => n.style.setProperty("--n", n.textContent.length));
+    document.querySelectorAll("[data-i18n-html]").forEach(n => { n.innerHTML = t[n.dataset.i18nHtml]; });
+    document.querySelectorAll("[data-i18n-aria]").forEach(n => { n.setAttribute("aria-label", t[n.dataset.i18nAria]); });
+    langBtn.textContent = lang;
+  }
+
+  langBtn.addEventListener("click", () => {
+    lang = lang === "ru" ? "en" : "ru";
+    store.set(lang);
+    const url = new URL(location.href);
+    url.searchParams.set("lang", lang);
+    history.replaceState(null, "", url);
+    apply();
+  });
+
+  apply();
+
+  // ---- download modal ----
+  const modal = document.getElementById("downloadModal");
+  const close = () => modal.close();
+  document.querySelectorAll("[data-open-download]").forEach(b => b.addEventListener("click", () => {
+    if (typeof modal.showModal === "function") modal.showModal();
+    else location.href = document.getElementById(/Win/i.test(navigator.userAgent) ? "dlWin" : "dlMac").href;
+  }));
+  document.getElementById("modalClose").addEventListener("click", close);
+  // a click on the backdrop lands on the <dialog> itself, outside its box
+  modal.addEventListener("click", e => {
+    if (e.target !== modal) return;
+    const r = modal.getBoundingClientRect();
+    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) close();
+  });
+  modal.querySelectorAll("a").forEach(a => a.addEventListener("click", () => setTimeout(close, 150)));
+})();
+</script>
+</body>
+</html>
