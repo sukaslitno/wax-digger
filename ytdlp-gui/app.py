@@ -1,4 +1,5 @@
 import collections
+import hashlib
 import itertools
 import json
 import os
@@ -1589,6 +1590,39 @@ def parse_clipboard_url(text):
     return text
 
 
+# Links done with (downloaded, or cleared out of the field) are not offered
+# from the clipboard again, also after a restart: a link still sitting on the
+# clipboard would otherwise come back into the field on every launch. Only a
+# short hash is kept, so the settings file is no download history.
+HANDLED_KEY = "handled_links"
+HANDLED_MAX = 200
+_handled_lock = threading.Lock()
+
+
+def link_digest(url):
+    return hashlib.sha256(url.strip().encode("utf-8")).hexdigest()[:16]
+
+
+def remember_handled_link(url):
+    if not isinstance(url, str) or not url.strip():
+        return
+    digest = link_digest(url)
+    with _handled_lock:
+        cfg = load_config()
+        kept = cfg.get(HANDLED_KEY)
+        kept = [d for d in kept if isinstance(d, str) and d != digest] if isinstance(kept, list) else []
+        cfg[HANDLED_KEY] = (kept + [digest])[-HANDLED_MAX:]
+        try:
+            save_config(cfg)
+        except OSError:
+            pass
+
+
+def link_handled(url):
+    kept = load_config().get(HANDLED_KEY)
+    return isinstance(kept, list) and link_digest(url) in kept
+
+
 def read_clipboard_text():
     if sys.platform == "darwin":
         cmds = [["/usr/bin/pbpaste"]]
@@ -1756,8 +1790,13 @@ class Api:
         return reveal_path(path)
 
     def clipboard_url(self):
-        """The link on the clipboard if it holds exactly one, else ''."""
-        return parse_clipboard_url(read_clipboard_text())
+        """The link on the clipboard if it holds exactly one not yet done with, else ''."""
+        link = parse_clipboard_url(read_clipboard_text())
+        return "" if link and link_handled(link) else link
+
+    def dismiss_link(self, url):
+        """A link done with (downloaded, or cleared out of the field): do not offer it again."""
+        remember_handled_link(url)
 
     def copy_text(self, text):
         """Copy text (the download log) to the clipboard. True if it worked."""
