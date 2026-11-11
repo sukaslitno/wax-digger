@@ -186,8 +186,8 @@ img { display: block; }
   border-radius: 999em; background: var(--g-input); min-width: 0;
 }
 .m-input--full { width: 100%; }
-/* easter egg: the link field quietly opens the album, with no hover hint */
-.m-egg { pointer-events: auto; cursor: default; color: inherit; -webkit-tap-highlight-color: transparent; }
+/* easter egg: the link field opens the album; only the cursor gives it away */
+.m-egg { pointer-events: auto; cursor: pointer; color: inherit; -webkit-tap-highlight-color: transparent; }
 .m-input--path { width: 26.94em; flex: none; }
 .m-input .ic { width: 1.5em; height: 1.5em; }
 .m-input__text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
