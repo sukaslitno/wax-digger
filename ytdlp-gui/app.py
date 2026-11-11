@@ -27,7 +27,7 @@ URL = f"http://{HOST}:{PORT}"
 IS_WINDOWS = os.name == "nt"
 
 # Shown on the info screen (served by /status). The one place to bump it.
-APP_VERSION = "1.1.2"
+APP_VERSION = "1.1.3"
 
 # The UI is a fixed 600px-wide modal; height follows the screen it shows
 # (260 empty / 336 folder / 396 info / 432 filled) via Api.resize().
