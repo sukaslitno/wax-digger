@@ -154,7 +154,6 @@ html, body {
   fill: none; stroke: var(--yellow); stroke-width: 6;
   stroke-dasharray: 100;
   stroke-dashoffset: calc(100 - var(--p, 0));
-  transition: stroke-dashoffset .25s ease;
 }
 .progress__glow {
   position: absolute; inset: 0; border-radius: 64px; opacity: 0;
@@ -236,7 +235,7 @@ html, body {
   <div class="progress" id="progress" hidden style="--p: 0">
     <svg viewBox="0 0 600 432" preserveAspectRatio="none" aria-hidden="true">
       <path pathLength="100"
-        d="M350 3 H536 A61 61 0 0 1 597 64 V368 A61 61 0 0 1 536 429 H64 A61 61 0 0 1 3 368 V64 A61 61 0 0 1 64 3 H350"/>
+        d="M350 3 H536 A61 61 0 0 1 597 64 V368 A61 61 0 0 1 536 429 H64 A61 61 0 0 1 3 368 V64 A61 61 0 0 1 64 3 H360"/>
     </svg>
     <div class="progress__glow"></div>
   </div>
@@ -782,8 +781,42 @@ function render() {
   resize(details ? 558 : info ? 396 : (!filled ? 260 : !hasFolder ? 336 : 432) + (hasUrl && needsDeezer ? 76 : 0) + (status ? 50 : 0));
 }
 
+// The outline glides to each reported percent instead of jumping to it, and
+// between reports it keeps creeping a little ahead, so it never stands still
+// mid-download. It never runs backwards except on a reset, and never shows 100
+// before the download says so.
+const progressView = { shown: 0, target: 0, last: 0, frame: 0 };
+const CREEP_AHEAD = 4;      // % it may run ahead of the last report
+const CREEP_SPEED = 0.6;    // %/s while waiting for the next report
+const GLIDE_MS = 380;       // time constant of the glide to a new report
+
+function drawProgress(now) {
+  const v = progressView;
+  const dt = Math.min(100, now - (v.last || now));
+  v.last = now;
+  if (v.shown < v.target) {
+    const glide = (v.target - v.shown) * (1 - Math.exp(-dt / GLIDE_MS));
+    v.shown = Math.min(v.target, v.shown + Math.max(glide, dt * 0.004));
+  } else if (v.target > 0 && v.target < 100) {
+    v.shown = Math.min(v.target + CREEP_AHEAD, 99, v.shown + CREEP_SPEED * dt / 1000);
+  }
+  progressEl.style.setProperty("--p", v.shown.toFixed(2));
+  const moving = v.shown < v.target || (v.target > 0 && v.target < 100 && v.shown < Math.min(v.target + CREEP_AHEAD, 99));
+  v.frame = moving ? requestAnimationFrame(drawProgress) : 0;
+  if (!moving) v.last = 0;
+}
+
 function setProgress(pct) {
-  progressEl.style.setProperty("--p", Math.max(0, Math.min(100, pct)));
+  const v = progressView;
+  const target = Math.max(0, Math.min(100, Number(pct) || 0));
+  if (target === 0 || target < v.target - 10) {
+    // a reset or a new download: jump back, never animate backwards
+    v.shown = target;
+  } else if (target < v.target) {
+    return;  // a small dip in the overall figure: hold rather than step back
+  }
+  v.target = target;
+  if (!v.frame) { v.last = 0; v.frame = requestAnimationFrame(drawProgress); }
 }
 
 // ===== format chips =====
