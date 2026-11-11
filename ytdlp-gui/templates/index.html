@@ -197,9 +197,7 @@ html, body {
 .wintools__bar {
   position: absolute; top: 20px; z-index: 16;
   display: flex; align-items: center;
-  opacity: 0; pointer-events: none; transition: opacity .15s ease;
 }
-.wintools__bar.is-visible { opacity: 1; pointer-events: auto; }
 .wintools__btn { border: 0; background: none; padding: 0; cursor: pointer; display: flex; }
 .wintools__dot, .wintools__ic { display: none; }
 
@@ -224,8 +222,9 @@ html, body {
 .wintools__btn:hover .wintools__ic { opacity: 1; }
 .wintools__btn--close:hover .wintools__ic { color: var(--red); }
 
-/* the (i)/(x) corner would collide with the close button on Windows */
-.modal[data-tools="on"] .modal__corner { opacity: 0; pointer-events: none; }
+/* Windows has close/minimize in the top right, where the (i)/(x) corner is:
+   the corner takes the free top left instead, level with them */
+.modal[data-os="win"] .modal__corner { top: 20px; right: auto; left: 24px; }
 
 [hidden] { display: none !important; }
 .locked { pointer-events: none; }
@@ -375,7 +374,7 @@ html, body {
     "url.placeholder": "paste a track / album / playlist link",
     "folder.placeholder": "output folder",
     "browse": "browse",
-    "deezer.arl": "deezer arl",
+    "deezer.arl": "deezer arl: the arl cookie from deezer.com",
     "deezer.arl_change": "deezer arl (change session)",
     "connect": "connect",
     "deezer.added": "deezer session added for this launch",
@@ -426,7 +425,7 @@ html, body {
     "url.placeholder": "ссылка на трек / альбом / плейлист",
     "folder.placeholder": "куда сохранять",
     "browse": "выбрать",
-    "deezer.arl": "deezer arl",
+    "deezer.arl": "deezer arl: cookie arl с deezer.com",
     "deezer.arl_change": "deezer arl (новая сессия)",
     "connect": "подключить",
     "deezer.added": "deezer подключён до перезапуска",
@@ -1351,26 +1350,9 @@ async function prefillFromClipboard() {
 }
 window.addEventListener("focus", prefillFromClipboard);
 
-// ===== window controls: hover near the top edge reveals close/minimize =====
-const winTools = el("winTools"), winBar = el("winBar");
-let toolsTimer = 0;
-
-function showTools() {
-  clearTimeout(toolsTimer);
-  winBar.classList.add("is-visible");
-  el("modal").dataset.tools = "on";
-}
-
-function hideTools() {
-  clearTimeout(toolsTimer);  // a short grace period so it does not blink
-  toolsTimer = setTimeout(() => {
-    winBar.classList.remove("is-visible");
-    el("modal").dataset.tools = "";
-  }, 300);
-}
-
-winTools.addEventListener("mouseenter", showTools);
-winTools.addEventListener("mouseleave", hideTools);
+// ===== window controls: close/minimize, always in sight =====
+// (they used to show only on hovering the top edge, and closing was a riddle)
+const winTools = el("winTools");
 el("winClose").addEventListener("click", () => api("close_window"));
 el("winMin").addEventListener("click", () => api("minimize"));
 
@@ -1379,7 +1361,7 @@ el("winMin").addEventListener("click", () => api("minimize"));
 async function initTools() {
   try {
     const os = await api("platform");
-    winTools.dataset.os = os === "darwin" ? "mac" : "win";
+    winTools.dataset.os = el("modal").dataset.os = os === "darwin" ? "mac" : "win";
     winTools.hidden = false;
   } catch (e) {}
   render();
